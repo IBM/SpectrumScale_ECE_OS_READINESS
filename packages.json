@@ -1,0 +1,7 @@
+{
+  "json_version": "1.0",
+  "dmidecode": 0,
+  "pciutils": 0,
+  "sg3_utils": 0,
+  "sdparm": 0
+}
