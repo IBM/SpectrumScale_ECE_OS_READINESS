@@ -54,12 +54,12 @@ except ImportError:
 DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
-SUPPORTED_OS_MD5 = "a21d225f424c1638017971b5e3dfaaaa"
-SYSCTL_MD5 = "5737397a77786735c9433006bed78cc4"
-PACKAGES_MD5 = "67edd8153e53a8de8d51caf04ab7cafb"
-SAS_ADAPTERS_MD5 = "38cf453b09d44adc6faf944a4b2ccbd5"
-NIC_ADAPTERS_MD5 = "2498a663f2b99c2a3d1e4d56fab815da"
 HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
+NIC_ADAPTERS_MD5 = "2498a663f2b99c2a3d1e4d56fab815da"
+PACKAGES_MD5 = "62a4d7bbc57d4ad0ee5fa3dcfdd3983f"
+SAS_ADAPTERS_MD5 = "b3cae5192b00396de10bbdf408f08b28"
+SUPPORTED_OS_MD5 = "395c11237e05195c809c0bf8e184f31a"
+SYSCTL_MD5 = "5737397a77786735c9433006bed78cc4"
 
 
 # Functions
@@ -829,17 +829,22 @@ def check_WCE_NVME(NVME_dict):
     fatal_error = False
     for drive in NVME_dict.keys():
         os_device = NVME_dict[drive][0]
+        wce_drive_enabled = False
         try:
 
-            write_cache_drive = commands.getoutput(
+            rc, write_cache_drive = commands.getstatusoutput(
                 '/usr/bin/sdparm -g WCE=1 -H ' + os_device)
         except BaseException:
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
                 " cannot read WCE status for NVMe devices")
-        wce_drive_enabled = bool(int(write_cache_drive, 16))
-        NVME_dict[drive].append(wce_drive_enabled)
+
+        # if WCE is not supported on device the we expect nonzero rc
+        if rc == 0:
+            wce_drive_enabled = bool(int(write_cache_drive, 16))
+            NVME_dict[drive].append(wce_drive_enabled)
+
         if wce_drive_enabled:
             print(
                 ERROR +
@@ -872,16 +877,21 @@ def check_WCE_SAS(SAS_drives_dict):
         map_error, os_device = map_WWN_to_OS_device (drive_WWN_list[2].lower())
         SAS_drives_dict[drive].append(map_error)
         SAS_drives_dict[drive].append(os_device)
+        wce_drive_enabled = False
         try:
-            write_cache_drive = commands.getoutput(
+            rc, write_cache_drive = commands.getstatusoutput(
                 '/usr/bin/sdparm -g WCE=1 -H /dev/' + os_device)
         except BaseException:
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
                 " cannot read WCE status for SAS devices")
-        wce_drive_enabled = bool(int(write_cache_drive, 16))
-        SAS_drives_dict[drive].append(wce_drive_enabled)
+
+        # if WCE is not supported on device the we expect nonzero rc
+        if rc == 0:
+            wce_drive_enabled = bool(int(write_cache_drive, 16))
+            SAS_drives_dict[drive].append(wce_drive_enabled)
+
         if wce_drive_enabled:
             print(
                 ERROR +
