@@ -71,7 +71,7 @@ def parse_arguments():
         required=True,
         action='store',
         dest='ip_address',
-        help='IP address linked to device used for NSD',
+        help='Local IP address linked to device used for NSD',
         metavar='IPv4_ADDRESS',
         type=str,
         default="NO IP")

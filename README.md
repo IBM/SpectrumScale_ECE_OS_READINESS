@@ -4,7 +4,7 @@ This tool is run when installing ECE with the Spectrum Scale toolkit, it is used
 
 The tool requires the packages that are listed on on packages.json, in addition to those would need nvme-cli if NVME are installed and storcli if SAS card is installed.
 
-The tool requires one parameter (--ip) to be passed, it has to be the IP where RAID traffic is going to happen. It does not allow names of a node it must be an IPv4 address
+The tool requires one parameter (--ip) to be passed, it has to be the local IP where RAID traffic is going to happen. It does not allow names of a node it must be an IPv4 address
 
 ```
 # ./mor.py -h
@@ -15,7 +15,7 @@ usage: mor.py [-h] --ip IPv4_ADDRESS [--path PATH/] [--no-cpu-check]
 
 optional arguments:
   -h, --help           show this help message and exit
-  --ip IPv4_ADDRESS    IP address linked to device used for NSD
+  --ip IPv4_ADDRESS    Local IP address linked to device used for NSD
   --path PATH/         Path ending with / where JSON files are located.
                        Defaults to local directory
   --no-cpu-check       Does not run CPU checks
