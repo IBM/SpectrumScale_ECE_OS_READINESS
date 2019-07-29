@@ -62,7 +62,7 @@ DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
 HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
-NIC_ADAPTERS_MD5 = "fa3c3f742f1900b64def3fd5c98ad133"
+NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "62a4d7bbc57d4ad0ee5fa3dcfdd3983f"
 SAS_ADAPTERS_MD5 = "d5bcb8306dcfa163af85f23b84f4a375"
 SUPPORTED_OS_MD5 = "395c11237e05195c809c0bf8e184f31a"
@@ -1421,6 +1421,17 @@ def main():
                     LOCAL_HOSTNAME +
                     " has missing packages needed to run this tool\n")
             else:
+                #Extra information to the JSON
+                call_all = exec_cmd(
+                    "/opt/MegaRAID/storcli/storcli64 /call show all j")
+                outputfile_dict['storcli_call'] = call_all
+                call_eall_all = exec_cmd(
+                    "/opt/MegaRAID/storcli/storcli64 /call/eall show all j")
+                outputfile_dict['storcli_call_eall'] = call_eall_all
+                call_sall_all = exec_cmd(
+                    "/opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j")
+                outputfile_dict['storcli_call_sall_all'] = call_sall_all
+                #Checks start
                 HDD_error, n_HDD_drives, HDD_dict = check_SAS_disks("HDD")
                 outputfile_dict['HDD_fatal_error'] = HDD_error
                 outputfile_dict['HDD_n_of_drives'] = n_HDD_drives
@@ -1575,17 +1586,9 @@ def main():
     else:
         outputfile_dict['ECE_node_ready'] = True
 
-    #Extra information to the JSON
+    #Save lspci output to JSON
     lspci_output = exec_cmd("lspci")
     outputfile_dict['lspci'] = lspci_output
-    call_all = exec_cmd("/opt/MegaRAID/storcli/storcli64 /call show all j")
-    outputfile_dict['storcli_call'] = call_all
-    call_eall_all = exec_cmd(
-        "/opt/MegaRAID/storcli/storcli64 /call/eall show all j")
-    outputfile_dict['storcli_call_eall'] = call_eall_all
-    call_sall_all = exec_cmd(
-        "/opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j")
-    outputfile_dict['storcli_call_sall_all'] = call_sall_all
 
     # Exit protocol
     DEVNULL.close()
