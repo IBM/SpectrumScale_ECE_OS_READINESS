@@ -1,6 +1,6 @@
 {
   "json_version": "1.0",
-  "ConnectX-4": 0,
-  "ConnectX-5": 1,
-  "ConnectX-6": 2
+  "ConnectX-4": "OK",
+  "ConnectX-5": "OK",
+  "ConnectX-6": "OK"
   }

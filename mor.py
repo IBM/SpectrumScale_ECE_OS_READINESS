@@ -10,12 +10,15 @@ import socket
 import commands
 import imp
 import hashlib
+import re
+import shlex
+
 
 # Start the clock
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.0"
+MOR_VERSION = "1.1"
 
 #GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -33,6 +36,10 @@ ERROR = "[ " + RED + "FATAL" + NOCOLOR + " ] "
 
 # Get hostname for output on screen
 LOCAL_HOSTNAME = platform.node().split('.', 1)[0]
+
+# Regex patterns
+SASPATT = re.compile('.*"SAS address"\s*:\s*"0x(?P<sasaddr>.*)"')
+WWNPATT = re.compile('.*"WWN"\s*:\s*"(?P<wwn>.*)"')
 
 # Next are python modules that need to be checked before import
 try:
@@ -55,9 +62,9 @@ DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
 HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
-NIC_ADAPTERS_MD5 = "2498a663f2b99c2a3d1e4d56fab815da"
+NIC_ADAPTERS_MD5 = "fa3c3f742f1900b64def3fd5c98ad133"
 PACKAGES_MD5 = "62a4d7bbc57d4ad0ee5fa3dcfdd3983f"
-SAS_ADAPTERS_MD5 = "b3cae5192b00396de10bbdf408f08b28"
+SAS_ADAPTERS_MD5 = "d5bcb8306dcfa163af85f23b84f4a375"
 SUPPORTED_OS_MD5 = "395c11237e05195c809c0bf8e184f31a"
 SYSCTL_MD5 = "5737397a77786735c9433006bed78cc4"
 
@@ -659,7 +666,7 @@ def check_NVME_packages(packages_ch):
     if packages_ch:
         print (INFO +
         LOCAL_HOSTNAME +
-        " Checking that needed software for NVMe is installed")
+        " checking that needed software for NVMe is installed")
         nvme_packages_errors = packages_check(nvme_packages)
         if nvme_packages_errors:
             fatal_error = True
@@ -672,7 +679,7 @@ def check_SAS_packages(packages_ch):
     if packages_ch:
         print (INFO +
         LOCAL_HOSTNAME +
-        " Checking that needed software for SAS is installed")
+        " checking that needed software for SAS is installed")
         sas_packages_errors = packages_check(sas_packages)
         if sas_packages_errors:
             fatal_error = True
@@ -734,15 +741,27 @@ def check_SAS(SAS_dictionary):
                 lspci_out.wait()
 
                 if grep_rc_lspci == 0:  # We have this SAS, 1 or more
-                    print(
-                        INFO +
-                        LOCAL_HOSTNAME +
-                        " has " +
-                        SAS +
-                        " adapter which is supported by ECE. The disks " +
-                        "under this SAS adapter could be used by ECE")
-                    found_SAS = True
-                    SAS_model.append(SAS)
+                    if SAS_dictionary[SAS] == "OK":
+                        print(
+                            INFO +
+                            LOCAL_HOSTNAME +
+                            " has " +
+                            SAS +
+                            " adapter which is supported by ECE. The disks " +
+                            "under this SAS adapter could be used by ECE")
+                        found_SAS = True
+                        SAS_model.append(SAS)
+                    else:
+                        print(
+                            ERROR +
+                            LOCAL_HOSTNAME +
+                            " has " +
+                            SAS +
+                            " adapter which is explicitly not supported by " +
+                            "ECE. The disks under this SAS adapter cannot " +
+                            "be used by ECE")
+                        found_SAS = False
+                        SAS_model.append(SAS)
             except BaseException:
                 sys.exit(
                     ERROR +
@@ -761,6 +780,23 @@ def check_SAS(SAS_dictionary):
     return fatal_error, SAS_model
 
 
+def exec_cmd(command):
+    #write command to JSON to have an idea of the system
+
+    try:
+        run_cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE)
+        run_cmd.wait()
+        cmd_output = run_cmd.stdout.read()
+        return cmd_output
+
+    except BaseException:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot run " + str(command))
+
+
+
 def check_SAS_disks(device_type):
     fatal_error = False
     num_errors = 0
@@ -768,8 +804,8 @@ def check_SAS_disks(device_type):
     SAS_drives_dict = {}
     try:
         drives = commands.getoutput(
-            "/opt/MegaRAID/storcli/storcli64 /call/dall show all " +
-            "| grep JBOD | grep SAS | grep " +
+            "/opt/MegaRAID/storcli/storcli64 /call show " +
+            "| egrep \"JBOD|UGood\" | grep SAS | grep " +
             device_type).split('\n')
         number_of_drives = len(drives)
 
@@ -865,16 +901,22 @@ def check_WCE_SAS(SAS_drives_dict):
     for drive in SAS_drives_dict.keys():
         enc_slot_list = drive.split(':')
         try:
-            drive_WWN_list = commands.getoutput(
+            storcli_output = commands.getoutput(
                 '/opt/MegaRAID/storcli/storcli64 /call/e' + enc_slot_list[0] +
-                '/s' + enc_slot_list[1] + ' show all | grep "WWN"').split(' ')
-        except BaseException:
+                '/s' + enc_slot_list[1] + ' show all j ')
+            wwn = WWNPATT.search(storcli_output).group('wwn')
+            sasaddr = SASPATT.search(storcli_output).group('sasaddr')
+            if wwn == 'NA':
+                # if wwn is not defined, use sasaddr - we truncate last
+                # digit later
+                wwn = sasaddr
+        except BaseException as e:
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
                 " cannot parse WWN for SAS devices")
-        SAS_drives_dict[drive].append(drive_WWN_list[2])
-        map_error, os_device = map_WWN_to_OS_device (drive_WWN_list[2].lower())
+        SAS_drives_dict[drive].append(wwn.lower())
+        map_error, os_device = map_WWN_to_OS_device (wwn.lower())
         SAS_drives_dict[drive].append(map_error)
         SAS_drives_dict[drive].append(os_device)
         wce_drive_enabled = False
@@ -900,6 +942,8 @@ def check_WCE_SAS(SAS_drives_dict):
                 str(os_device) +
                 " has Write Cache Enabled. This is not supported by ECE")
             num_errors = num_errors + 1
+
+        # why do we need to check again with storcli?
         try:
             write_cache_list = commands.getoutput(
                 '/opt/MegaRAID/storcli/storcli64 /call/e' + enc_slot_list[0] +
@@ -910,8 +954,17 @@ def check_WCE_SAS(SAS_drives_dict):
                 ERROR +
                 LOCAL_HOSTNAME +
                 " cannot read WCE status for SAS card")
-        SAS_drives_dict[drive].append(write_cache_list[3])
-        if write_cache_list[3] == "Enabled":
+
+        # if write cache entry is returned by storcli, use it
+        # otherwise ignore
+        if len(write_cache_list) > 3:
+             wc_status = write_cache_list[3]
+             SAS_drives_dict[drive].append(write_cache_list[3])
+        else:
+             wc_status = 'Unsupported'
+
+        SAS_drives_dict[drive].append(wc_status)
+        if  wc_status == "Enabled":
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -927,11 +980,18 @@ def check_WCE_SAS(SAS_drives_dict):
 def map_WWN_to_OS_device(drive_WWN):
     fatal_error = False
     num_errors = 0
-    truncated_WWN = drive_WWN[:-2]
+    # ignore the least signicant digit - this is enough to uniquely ID
+    # drives by WWN.  (but need all other digits - here is an example
+    # where ignoring last 2 digits causes a problem:
+    # # lsscsi -w | grep 0x50000397c82ac4
+    # [1:0:20:0]   disk    0x50000397c82ac4b9                  /dev/sdt
+    # [1:0:21:0]   disk    0x50000397c82ac461                  /dev/sdu
+    # [1:0:23:0]   disk    0x50000397c82ac42d                  /dev/sdw
+    truncated_WWN = drive_WWN[:-1]
     try:
         OS_drive_list = commands.getoutput(
             '/usr/bin/readlink /dev/disk/by-id/wwn-0x' + truncated_WWN +
-            '?? | /usr/bin/head -1').split('/')
+            '? | /usr/bin/head -1').split('/')
     except BaseException:
         sys.exit(
             ERROR +
@@ -966,10 +1026,23 @@ def check_NIC(NIC_dictionary):
                 lspci_out.wait()
 
                 if grep_rc_lspci == 0:  # We have this NIC, 1 or more
-                    print(INFO + LOCAL_HOSTNAME + " has " + NIC +
-                          " adapter which is supported by ECE")
-                    found_NIC = True
-                    NIC_model.append(NIC)
+                    if NIC_dictionary[NIC] == "OK":
+                        print(INFO + LOCAL_HOSTNAME + " has " + NIC +
+                            " adapter which is supported by ECE")
+                        found_NIC = True
+                        NIC_model.append(NIC)
+                    else:
+                        print(
+                            ERROR +
+                            LOCAL_HOSTNAME +
+                            " has " +
+                            NIC +
+                            " adapter which is explicitly not supported by " +
+                            "ECE")
+                        found_NIC = False
+                        fatal_error = True
+                        NIC_model.append(NIC)
+
             except BaseException:
                 sys.exit(
                     ERROR +
@@ -1125,12 +1198,12 @@ def print_summary_standalone(
         sys.exit(
             ERROR +
             LOCAL_HOSTNAME +
-            " this system cannot run IBM Spectrum Scale Erasure Code Edition")
+            " system cannot run IBM Spectrum Scale Erasure Code Edition")
     elif all_checks_on:
         print(
             INFO +
             LOCAL_HOSTNAME +
-            " this system can run IBM Spectrum Scale Erasure Code Edition")
+            " system can run IBM Spectrum Scale Erasure Code Edition")
     else:
         print(
             WARNING +
@@ -1501,6 +1574,18 @@ def main():
         outputfile_dict['ECE_node_ready'] = False
     else:
         outputfile_dict['ECE_node_ready'] = True
+
+    #Extra information to the JSON
+    lspci_output = exec_cmd("lspci")
+    outputfile_dict['lspci'] = lspci_output
+    call_all = exec_cmd("/opt/MegaRAID/storcli/storcli64 /call show all j")
+    outputfile_dict['storcli_call'] = call_all
+    call_eall_all = exec_cmd(
+        "/opt/MegaRAID/storcli/storcli64 /call/eall show all j")
+    outputfile_dict['storcli_call_eall'] = call_eall_all
+    call_sall_all = exec_cmd(
+        "/opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j")
+    outputfile_dict['storcli_call_sall_all'] = call_sall_all
 
     # Exit protocol
     DEVNULL.close()
