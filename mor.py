@@ -7,8 +7,13 @@ import subprocess
 import platform
 import argparse
 import socket
-import commands
-import imp
+try:
+    import commands      # Python 2
+    PYTHON3 = False
+except ModuleNotFoundError:  # Python 3
+    import subprocess
+    PYTHON3 = True
+import importlib
 import hashlib
 import re
 import shlex
@@ -18,7 +23,7 @@ import shlex
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.1"
+MOR_VERSION = "1.3"
 
 #GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -44,7 +49,7 @@ WWNPATT = re.compile('.*"WWN"\s*:\s*"(?P<wwn>.*)"')
 # Next are python modules that need to be checked before import
 try:
     import dmidecode
-except ImportError:
+except ModuleNotFoundError:
     sys.exit(
         ERROR +
         LOCAL_HOSTNAME +
@@ -331,8 +336,12 @@ def check_NIC_speed(net_interface, min_link_speed):
     fatal_error = False
     device_speed = 0
     try:
-        ethtool_out = commands.getoutput(
-            'ethtool ' + net_interface + ' | grep "Speed:"').split()
+        if PYTHON3:
+            ethtool_out = subprocess.getoutput(
+                'ethtool ' + net_interface + ' | grep "Speed:"').split()
+        else:
+            ethtool_out = commands.getoutput(
+                'ethtool ' + net_interface + ' | grep "Speed:"').split()
         device_speed = ''.join(ethtool_out[1].split())
         device_speed = device_speed[:-4]
         device_speed = device_speed[-6:]
@@ -664,7 +673,7 @@ def check_NVME_packages(packages_ch):
     fatal_error = False
     nvme_packages = {"nvme-cli": 0}
     if packages_ch:
-        print (INFO +
+        print(INFO +
         LOCAL_HOSTNAME +
         " checking that needed software for NVMe is installed")
         nvme_packages_errors = packages_check(nvme_packages)
@@ -677,7 +686,7 @@ def check_SAS_packages(packages_ch):
     fatal_error = False
     sas_packages = {"storcli": 0}
     if packages_ch:
-        print (INFO +
+        print(INFO +
         LOCAL_HOSTNAME +
         " checking that needed software for SAS is installed")
         sas_packages_errors = packages_check(sas_packages)
@@ -690,7 +699,10 @@ def check_NVME_disks():
     # If we run this we already check elsewhere that there are NVme drives
     fatal_error = False
     try:
-        drives = commands.getoutput("nvme list | grep nvme").split('\n')
+        if PYTHON3:
+            drives = subprocess.getoutput("nvme list | grep nvme").split('\n')
+        else:
+            drives = commands.getoutput("nvme list | grep nvme").split('\n')
         drives_dict = {}
         drives_size_list = []
         for single_drive in drives:
@@ -803,10 +815,16 @@ def check_SAS_disks(device_type):
     number_of_drives = 0
     SAS_drives_dict = {}
     try:
-        drives = commands.getoutput(
-            "/opt/MegaRAID/storcli/storcli64 /call show " +
-            "| egrep \"JBOD|UGood\" | grep SAS | grep " +
-            device_type).split('\n')
+        if PYTHON3:
+            drives = subprocess.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 /call show " +
+                "| egrep \"JBOD|UGood\" | grep SAS | grep " +
+                device_type).split('\n')
+        else:
+            drives = commands.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 /call show " +
+                "| egrep \"JBOD|UGood\" | grep SAS | grep " +
+                device_type).split('\n')
         number_of_drives = len(drives)
 
         if number_of_drives > 0:
@@ -867,9 +885,12 @@ def check_WCE_NVME(NVME_dict):
         os_device = NVME_dict[drive][0]
         wce_drive_enabled = False
         try:
-
-            rc, write_cache_drive = commands.getstatusoutput(
-                '/usr/bin/sdparm -g WCE=1 -H ' + os_device)
+            if PYTHON3:
+                rc, write_cache_drive = subprocess.getstatusoutput(
+                    '/usr/bin/sdparm -g WCE=1 -H ' + os_device)
+            else:
+                rc, write_cache_drive = commands.getstatusoutput(
+                    '/usr/bin/sdparm -g WCE=1 -H ' + os_device)
         except BaseException:
             sys.exit(
                 ERROR +
@@ -901,9 +922,14 @@ def check_WCE_SAS(SAS_drives_dict):
     for drive in SAS_drives_dict.keys():
         enc_slot_list = drive.split(':')
         try:
-            storcli_output = commands.getoutput(
-                '/opt/MegaRAID/storcli/storcli64 /call/e' + enc_slot_list[0] +
-                '/s' + enc_slot_list[1] + ' show all j ')
+            if PYTHON3:
+                storcli_output = subprocess.getoutput(
+                    '/opt/MegaRAID/storcli/storcli64 /call/e' +
+                    enc_slot_list[0] + '/s' + enc_slot_list[1] + ' show all j ')
+            else:
+                storcli_output = commands.getoutput(
+                    '/opt/MegaRAID/storcli/storcli64 /call/e' + enc_slot_list[0] +
+                    '/s' + enc_slot_list[1] + ' show all j ')
             wwn = WWNPATT.search(storcli_output).group('wwn')
             sasaddr = SASPATT.search(storcli_output).group('sasaddr')
             if wwn == 'NA':
@@ -921,8 +947,12 @@ def check_WCE_SAS(SAS_drives_dict):
         SAS_drives_dict[drive].append(os_device)
         wce_drive_enabled = False
         try:
-            rc, write_cache_drive = commands.getstatusoutput(
-                '/usr/bin/sdparm -g WCE=1 -H /dev/' + os_device)
+            if PYTHON3:
+                rc, write_cache_drive = subprocess.getstatusoutput(
+                    '/usr/bin/sdparm -g WCE=1 -H /dev/' + os_device)
+            else:
+                rc, write_cache_drive = commands.getstatusoutput(
+                    '/usr/bin/sdparm -g WCE=1 -H /dev/' + os_device)
         except BaseException:
             sys.exit(
                 ERROR +
@@ -945,10 +975,18 @@ def check_WCE_SAS(SAS_drives_dict):
 
         # why do we need to check again with storcli?
         try:
-            write_cache_list = commands.getoutput(
-                '/opt/MegaRAID/storcli/storcli64 /call/e' + enc_slot_list[0] +
-                '/s' + enc_slot_list[1] +
-                ' show all | grep -i "Write Cache"').split(' ')
+            if PYTHON3:
+                write_cache_list = subprocess.getoutput(
+                    '/opt/MegaRAID/storcli/storcli64 /call/e' +
+                    enc_slot_list[0] +
+                    '/s' + enc_slot_list[1] +
+                    ' show all | grep -i "Write Cache"').split(' ')
+            else:
+                write_cache_list = commands.getoutput(
+                    '/opt/MegaRAID/storcli/storcli64 /call/e' +
+                    enc_slot_list[0] +
+                    '/s' + enc_slot_list[1] +
+                    ' show all | grep -i "Write Cache"').split(' ')
         except BaseException:
             sys.exit(
                 ERROR +
@@ -989,9 +1027,14 @@ def map_WWN_to_OS_device(drive_WWN):
     # [1:0:23:0]   disk    0x50000397c82ac42d                  /dev/sdw
     truncated_WWN = drive_WWN[:-1]
     try:
-        OS_drive_list = commands.getoutput(
-            '/usr/bin/readlink /dev/disk/by-id/wwn-0x' + truncated_WWN +
-            '? | /usr/bin/head -1').split('/')
+        if PYTHON3:
+            OS_drive_list = subprocess.getoutput(
+                '/usr/bin/readlink /dev/disk/by-id/wwn-0x' + truncated_WWN +
+                '? | /usr/bin/head -1').split('/')
+        else:
+            OS_drive_list = commands.getoutput(
+                '/usr/bin/readlink /dev/disk/by-id/wwn-0x' + truncated_WWN +
+                '? | /usr/bin/head -1').split('/')
     except BaseException:
         sys.exit(
             ERROR +
@@ -1173,7 +1216,7 @@ def print_summary_standalone(
             " sysctl setting[s] need to be changed. Check " +
             "information above this message")
 
-    print
+    print("")
     print("\tSummary of this standalone run:")
     print("\t\tRun started at " + str(start_time_date))
     print("\t\tECE Readiness version " + MOR_VERSION)
@@ -1190,9 +1233,9 @@ def print_summary_standalone(
     print("\t\tNVMe drives: " + str(number_of_NVME_drives))
     print("\t\tLink speed: " + str(device_speed))
     print("\t\tRun ended at " + str(end_time_date))
-    print
+    print("")
     print("\t\t" + outputfile_name + " contains information about this run")
-    print
+    print("")
 
     if nfatal_errors > 0:
         sys.exit(
