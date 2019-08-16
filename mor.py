@@ -23,7 +23,7 @@ import shlex
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.3"
+MOR_VERSION = "1.4"
 
 #GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -813,6 +813,7 @@ def check_SAS_disks(device_type):
     fatal_error = False
     num_errors = 0
     number_of_drives = 0
+    number_of_SATA_drives = 0
     SAS_drives_dict = {}
     try:
         if PYTHON3:
@@ -820,12 +821,33 @@ def check_SAS_disks(device_type):
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
                 "| egrep \"JBOD|UGood\" | grep SAS | grep " +
                 device_type).split('\n')
+            SATA_drives = subprocess.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 /call show " +
+                "| grep SATA | grep " +
+                device_type).split('\n')
         else:
             drives = commands.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
                 "| egrep \"JBOD|UGood\" | grep SAS | grep " +
                 device_type).split('\n')
+            SATA_drives = commands.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 /call show " +
+                "| grep SATA | grep " +
+                device_type).split('\n')
         number_of_drives = len(drives)
+        number_of_SATA_drives = len(SATA_drives)
+
+        if number_of_SATA_drives > 1:
+            # Throw a warning about SATA drives
+            print(
+                WARNING +
+                LOCAL_HOSTNAME +
+                " has " +
+                str(number_of_SATA_drives) +
+                " SATA " +
+                device_type +
+                " drive[s] on the SAS adapter. SATA drives are not supported " +
+                "by ECE. Do not use them for ECE")
 
         if number_of_drives > 0:
             drives_size_list = []
