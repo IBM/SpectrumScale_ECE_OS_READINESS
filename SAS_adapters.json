@@ -1,6 +1,7 @@
 {
-  "json_version": "1.1",
+  "json_version": "1.2",
   "SAS-3 3108": "OK",
   "SAS3516": "OK",
-  "SAS3008": "NOK"
+  "SAS3008": "NOK",
+  "SAS3508": "OK"
   }
