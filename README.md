@@ -31,7 +31,7 @@ optional arguments:
   -v, --version        show program's version number and exit
 ```
 
-  Additionally optional parameters to skip certain checks can be passed. To be able to install ECE your node must pass all the tests
+  Additionally optional parameters to skip certain checks can be passed. To be able to install ECE your node must pass all the tests on all nodes. You can additionally gather the JSON output files and run [SpectrumScale_ECE_OS_OVERVIEW](https://github.com/IBM/SpectrumScale_ECE_OS_OVERVIEW)
 
   A "good enough" run is shown below:
 
