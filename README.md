@@ -2,7 +2,11 @@ This tool assesses the readiness of a single node to run IBM Spectrum Scale Eras
 
 This tool is run when installing ECE with the Spectrum Scale toolkit, it is used by the toolkit to do a more comprehensive inter node checking from a cluster perspective, this tool does only check at node level. Each run it generates a JSON file with name IP_ADDRESS.json where some data is saved, on standalone mode this file is only for reference.
 
-The tool requires the packages that are listed on on packages.json, in addition to those would need nvme-cli if NVME are installed and storcli if SAS card is installed.
+SW requirements:
+ - RPM packages that are listed on on packages.json file.
+ - needs python-dmidecode and python-ethtool RPM packages.
+ - nvme-cli if NVME are drives are installed
+ - storcli if SAS card[s] are installed.
 
 The tool requires one parameter (--ip) to be passed, it has to be the local IP where RAID traffic is going to happen. It does not allow names of a node it must be an IPv4 address
 
