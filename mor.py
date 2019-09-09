@@ -7,23 +7,28 @@ import subprocess
 import platform
 import argparse
 import socket
-try:
-    import commands      # Python 2
-    PYTHON3 = False
-except ModuleNotFoundError:  # Python 3
-    import subprocess
-    PYTHON3 = True
 import importlib
 import hashlib
 import re
 import shlex
 
+try:
+    raw_input      # Python 2
+    PYTHON3 = False
+except NameError:  # Python 3
+    raw_input = input
+    PYTHON3 = True
+
+if PYTHON3:
+    import subprocess
+else:
+    import commands
 
 # Start the clock
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.4"
+MOR_VERSION = "1.5"
 
 #GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -49,7 +54,7 @@ WWNPATT = re.compile('.*"WWN"\s*:\s*"(?P<wwn>.*)"')
 # Next are python modules that need to be checked before import
 try:
     import dmidecode
-except ModuleNotFoundError:
+except ImportError:
     sys.exit(
         ERROR +
         LOCAL_HOSTNAME +
