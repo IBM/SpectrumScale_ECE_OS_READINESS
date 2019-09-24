@@ -28,9 +28,9 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.5"
+MOR_VERSION = "1.6"
 
-#GIT URL
+# GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
 
 # Colorful constants
@@ -50,6 +50,7 @@ LOCAL_HOSTNAME = platform.node().split('.', 1)[0]
 # Regex patterns
 SASPATT = re.compile('.*"SAS address"\s*:\s*"0x(?P<sasaddr>.*)"')
 WWNPATT = re.compile('.*"WWN"\s*:\s*"(?P<wwn>.*)"')
+OSVERPATT = re.compile('(?P<major>\d+)[\.](?P<minor>\d+)[\.].*')
 
 # Next are python modules that need to be checked before import
 try:
@@ -74,8 +75,8 @@ DEVNULL = open(os.devnull, 'w')
 HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "62a4d7bbc57d4ad0ee5fa3dcfdd3983f"
-SAS_ADAPTERS_MD5 = "505fee36e3a50afe014edd80e0d85436"
-SUPPORTED_OS_MD5 = "395c11237e05195c809c0bf8e184f31a"
+SAS_ADAPTERS_MD5 = "5a7dc0746cb1fe1b218b655800c0a0ee"
+SUPPORTED_OS_MD5 = "d5ef1280707912298764c4c39c844fc6"
 SYSCTL_MD5 = "5737397a77786735c9433006bed78cc4"
 
 
@@ -570,8 +571,17 @@ def check_os_redhat(os_dictionary):
     fatal_error = False
     # Check redhat-release vs dictionary list
     redhat_distribution = platform.linux_distribution()
+    version_string = redhat_distribution[1]
+    if platform.dist()[0] == "centos":
+        try:
+            matchobj = re.match(OSVERPATT, version_string)
+            version_string = "{}.{}".format(matchobj.group('major'),
+                                            matchobj.group('minor'))
+        except AttributeError:
+            pass
+
     redhat_distribution_str = redhat_distribution[0] + \
-        " " + redhat_distribution[1]
+        " " + version_string
 
     error_message = ERROR + LOCAL_HOSTNAME + " " + \
         redhat_distribution_str + " is not a supported OS to run ECE"
@@ -583,6 +593,15 @@ def check_os_redhat(os_dictionary):
                 " " +
                 redhat_distribution_str +
                 " is a supported OS to run ECE")
+        elif os_dictionary[redhat_distribution_str] == 'WARN':
+            print(
+                WARNING +
+                LOCAL_HOSTNAME +
+                " " +
+                redhat_distribution_str +
+                " is a clone OS that is not officially supported" +
+                " to run ECE." +
+                " See Spectrum Scale FAQ for restrictions.")
         else:
             print(error_message)
             fatal_error = True
@@ -767,6 +786,19 @@ def check_SAS(SAS_dictionary):
                             " adapter which is supported by ECE. The disks " +
                             "under this SAS adapter could be used by ECE")
                         found_SAS = True
+                        check_disks = True
+                        SAS_model.append(SAS)
+                    elif SAS_dictionary[SAS] == "WARN":
+                        print(
+                            ERROR +
+                            LOCAL_HOSTNAME +
+                            " has " +
+                            SAS +
+                            " adapter which is NOT supported by ECE. The" +
+                            " disks under this SAS adapter will still be " +
+                            " checked for use by ECE")
+                        found_SAS = False
+                        check_disks = True
                         SAS_model.append(SAS)
                     else:
                         print(
@@ -778,6 +810,7 @@ def check_SAS(SAS_dictionary):
                             "ECE. The disks under this SAS adapter cannot " +
                             "be used by ECE")
                         found_SAS = False
+                        check_disks = False
                         SAS_model.append(SAS)
             except BaseException:
                 sys.exit(
@@ -788,17 +821,17 @@ def check_SAS(SAS_dictionary):
 
     if not found_SAS:
         print(
-            WARNING +
+            ERROR +
             LOCAL_HOSTNAME +
             " does not have any SAS adapter supported by ECE. The disks " +
             "under any SAS adapter in this system cannot be used by ECE")
         fatal_error = True
 
-    return fatal_error, SAS_model
+    return fatal_error, check_disks, SAS_model
 
 
 def exec_cmd(command):
-    #write command to JSON to have an idea of the system
+    # write command to JSON to have an idea of the system
 
     try:
         run_cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE)
@@ -811,7 +844,6 @@ def exec_cmd(command):
             ERROR +
             LOCAL_HOSTNAME +
             " cannot run " + str(command))
-
 
 
 def check_SAS_disks(device_type):
@@ -851,8 +883,8 @@ def check_SAS_disks(device_type):
                 str(number_of_SATA_drives) +
                 " SATA " +
                 device_type +
-                " drive[s] on the SAS adapter. SATA drives are not supported " +
-                "by ECE. Do not use them for ECE")
+                " drive[s] on the SAS adapter. SATA drives are not" +
+                " supported by ECE. Do not use them for ECE")
 
         if number_of_drives > 0:
             drives_size_list = []
@@ -939,11 +971,15 @@ def check_WCE_NVME(NVME_dict):
             num_errors = num_errors + 1
     if num_errors != 0:
         fatal_error = True
+    else:
+        print(INFO + LOCAL_HOSTNAME + " all NVME drives have Volatile Write" +
+              " Cache disabled")
+
     return fatal_error, NVME_dict
 
 
 def check_WCE_SAS(SAS_drives_dict):
-    #Check WCE is enabled, if so print an ERROR + return fatal_error True
+    # Check WCE is enabled, if so print an ERROR + return fatal_error True
     fatal_error = False
     num_errors = 0
     for drive in SAS_drives_dict.keys():
@@ -969,7 +1005,7 @@ def check_WCE_SAS(SAS_drives_dict):
                 LOCAL_HOSTNAME +
                 " cannot parse WWN for SAS devices")
         SAS_drives_dict[drive].append(wwn.lower())
-        map_error, os_device = map_WWN_to_OS_device (wwn.lower())
+        map_error, os_device = map_WWN_to_OS_device(wwn.lower())
         SAS_drives_dict[drive].append(map_error)
         SAS_drives_dict[drive].append(os_device)
         wce_drive_enabled = False
@@ -1023,13 +1059,13 @@ def check_WCE_SAS(SAS_drives_dict):
         # if write cache entry is returned by storcli, use it
         # otherwise ignore
         if len(write_cache_list) > 3:
-             wc_status = write_cache_list[3]
-             SAS_drives_dict[drive].append(write_cache_list[3])
+            wc_status = write_cache_list[3]
+            SAS_drives_dict[drive].append(write_cache_list[3])
         else:
-             wc_status = 'Unsupported'
+            wc_status = 'Unsupported'
 
         SAS_drives_dict[drive].append(wc_status)
-        if  wc_status == "Enabled":
+        if wc_status == "Enabled":
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -1039,6 +1075,10 @@ def check_WCE_SAS(SAS_drives_dict):
             num_errors = num_errors + 1
     if num_errors != 0:
         fatal_error = True
+    else:
+        print(INFO + LOCAL_HOSTNAME +
+              " all SAS drives have Volatile Write Cache disabled")
+
     return fatal_error, SAS_drives_dict
 
 
@@ -1073,7 +1113,7 @@ def map_WWN_to_OS_device(drive_WWN):
         os_device = "NONE"
         num_errors = num_errors + 1
 
-    if num_errors !=0:
+    if num_errors != 0:
         fatal_error = True
     return fatal_error, os_device
 
@@ -1098,7 +1138,7 @@ def check_NIC(NIC_dictionary):
                 if grep_rc_lspci == 0:  # We have this NIC, 1 or more
                     if NIC_dictionary[NIC] == "OK":
                         print(INFO + LOCAL_HOSTNAME + " has " + NIC +
-                            " adapter which is supported by ECE")
+                             " adapter which is supported by ECE")
                         found_NIC = True
                         NIC_model.append(NIC)
                     else:
@@ -1191,7 +1231,7 @@ def check_sysctl(sysctl_dictionary):
 def check_distribution():
     # Decide if this is a redhat or a suse
     what_dist = platform.dist()[0]
-    if what_dist == "redhat":
+    if what_dist in ["redhat", "centos"]:
         return what_dist
     else:  # everything else we fail
         print(ERROR + LOCAL_HOSTNAME + " ECE is only supported on RedHat")
@@ -1304,7 +1344,7 @@ def main():
         toolkit_run) = parse_arguments()
 
     if (cpu_check and md5_check and mem_check and os_check and packages_ch
-    and storage_check and net_check and sysctl_check):
+            and storage_check and net_check and sysctl_check):
         all_checks_on = True
     else:
         all_checks_on = False
@@ -1421,7 +1461,7 @@ def main():
     if os_check:
         linux_distribution = check_distribution()
         outputfile_dict['linux_distribution'] = linux_distribution
-        if linux_distribution == "redhat":
+        if linux_distribution in ["redhat", "centos"]:
             fatal_error, redhat_distribution_str = check_os_redhat(
                 os_dictionary)
             if fatal_error:
@@ -1479,10 +1519,10 @@ def main():
     SAS_but_no_usable_drives = False
     NVME_dict = {}
     if storage_check:
-        SAS_fatal_error, SAS_model = check_SAS(SAS_dictionary)
+        SAS_fatal_error, check_disks, SAS_model = check_SAS(SAS_dictionary)
         outputfile_dict['error_SAS_card'] = SAS_fatal_error
         outputfile_dict['SAS_model'] = SAS_model
-        if not SAS_fatal_error:
+        if check_disks:
             SAS_packages_errors = check_SAS_packages(packages_ch)
             outputfile_dict['SAS_packages_errors'] = SAS_packages_errors
             if SAS_packages_errors > 0:
@@ -1491,7 +1531,7 @@ def main():
                     LOCAL_HOSTNAME +
                     " has missing packages needed to run this tool\n")
             else:
-                #Extra information to the JSON
+                # Extra information to the JSON
                 call_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call show all j")
                 outputfile_dict['storcli_call'] = call_all
@@ -1501,7 +1541,7 @@ def main():
                 call_sall_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j")
                 outputfile_dict['storcli_call_sall_all'] = call_sall_all
-                #Checks start
+                # Checks start
                 HDD_error, n_HDD_drives, HDD_dict = check_SAS_disks("HDD")
                 outputfile_dict['HDD_fatal_error'] = HDD_error
                 outputfile_dict['HDD_n_of_drives'] = n_HDD_drives
@@ -1527,7 +1567,7 @@ def main():
                 if HDD_error and SSD_error:
                     SAS_but_no_usable_drives = True
                     outputfile_dict['found_SAS_card_but_no_drives'] = True
-        #NVME checks
+        # NVME checks
         NVME_error, n_NVME_drives = check_NVME()
         outputfile_dict['NVME_fatal_error'] = NVME_error
         outputfile_dict['NVME_number_of_drives'] = n_NVME_drives
@@ -1656,7 +1696,7 @@ def main():
     else:
         outputfile_dict['ECE_node_ready'] = True
 
-    #Save lspci output to JSON
+    # Save lspci output to JSON
     lspci_output = exec_cmd("lspci")
     outputfile_dict['lspci'] = lspci_output
 
