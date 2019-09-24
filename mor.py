@@ -761,6 +761,7 @@ def check_NVME_disks():
 
 def check_SAS(SAS_dictionary):
     fatal_error = False
+    check_disks = False
     SAS_model = []
     # do a lspci check if it has at least one adpater from the dictionary
     found_SAS = False
