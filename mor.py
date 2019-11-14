@@ -72,7 +72,7 @@ except ImportError:
 DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
-HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
+HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "be08283a6f0e325f2f1f35eff322aa6d"
 SAS_ADAPTERS_MD5 = "5a7dc0746cb1fe1b218b655800c0a0ee"
