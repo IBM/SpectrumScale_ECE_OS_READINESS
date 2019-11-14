@@ -9,5 +9,6 @@
   "Red Hat Enterprise Linux Server 7.6": "OK",
   "Red Hat Enterprise Linux Server 7.7": "OK",
   "CentOS Linux 7.5": "WARN",
-  "CentOS Linux 7.6": "WARN"
+  "CentOS Linux 7.6": "WARN",
+  "CentOS Linux 7.7": "WARN"
 }

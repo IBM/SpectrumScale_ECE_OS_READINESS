@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.6"
+MOR_VERSION = "1.7"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -72,11 +72,11 @@ except ImportError:
 DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
-HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
+HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
-PACKAGES_MD5 = "62a4d7bbc57d4ad0ee5fa3dcfdd3983f"
+PACKAGES_MD5 = "be08283a6f0e325f2f1f35eff322aa6d"
 SAS_ADAPTERS_MD5 = "5a7dc0746cb1fe1b218b655800c0a0ee"
-SUPPORTED_OS_MD5 = "0f344090d456941ab1c9d438752e7660"
+SUPPORTED_OS_MD5 = "4f874b5c9dd9af23a393aa527b612e55"
 SYSCTL_MD5 = "5737397a77786735c9433006bed78cc4"
 
 
@@ -836,8 +836,9 @@ def exec_cmd(command):
 
     try:
         run_cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE)
-        run_cmd.wait()
-        cmd_output = run_cmd.stdout.read()
+        cmd_output, cmd_stderr = run_cmd.communicate()
+        #run_cmd.wait()
+        #cmd_output = run_cmd.stdout.read()
         return cmd_output
 
     except BaseException:
@@ -1482,7 +1483,7 @@ def main():
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
-                " has missing packages needed to run this tool\n")
+                " has missing packages that need to be installed\n")
         else:
             outputfile_dict['packages_checked'] = packages_dictionary
 

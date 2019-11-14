@@ -2,7 +2,7 @@ This tool assesses the readiness of a single node to run IBM Spectrum Scale Eras
 
 This tool is run when installing ECE with the Spectrum Scale toolkit, it is used by the toolkit to do a more comprehensive inter node checking from a cluster perspective, this tool does only check at node level. Each run it generates a JSON file with name IP_ADDRESS.json where some data is saved, on standalone mode this file is only for reference.
 
-**PREREQUESITES:** Before running this tool you **must** install the software prerequesites. Those are:
+**PREREQUISITES:** Before running this tool you **must** install the software prerequisites. Those are:
  * RPM packages that are listed on on packages.json file.
  * python-dmidecode and python-ethtool RPM packages.
  * nvme-cli RPM package if NVME are drive[s] exists in the system
