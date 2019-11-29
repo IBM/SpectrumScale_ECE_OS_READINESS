@@ -1,9 +1,9 @@
 {
-  "json_version": "1.1",
+  "json_version": "1.2",
   "dmidecode": 0,
   "pciutils": 0,
   "sg3_utils": 0,
-  "sdparm": 0,
   "numactl": 0,
-  "numactl-libs": 0
+  "numactl-libs": 0,
+  "tuned": 0
 }

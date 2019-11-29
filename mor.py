@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.7"
+MOR_VERSION = "1.11"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -51,6 +51,8 @@ LOCAL_HOSTNAME = platform.node().split('.', 1)[0]
 SASPATT = re.compile('.*"SAS address"\s*:\s*"0x(?P<sasaddr>.*)"')
 WWNPATT = re.compile('.*"WWN"\s*:\s*"(?P<wwn>.*)"')
 OSVERPATT = re.compile('(?P<major>\d+)[\.](?P<minor>\d+)[\.].*')
+PCIPATT = re.compile('(?P<pciaddr>[a-fA-f0-9]{2}:[a-fA-f0-9]{2}[\.][0-9])'
+                     '[\ ](?P<pcival>.*)')
 
 # Next are python modules that need to be checked before import
 try:
@@ -72,12 +74,12 @@ except ImportError:
 DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
-HW_REQUIREMENTS_MD5 = "57518bc8a0d7a177ffa5cea8a61b1c72"
+HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
-PACKAGES_MD5 = "be08283a6f0e325f2f1f35eff322aa6d"
+PACKAGES_MD5 = "e6a2dd14073e9f2c86937196e199bf71"
 SAS_ADAPTERS_MD5 = "5a7dc0746cb1fe1b218b655800c0a0ee"
 SUPPORTED_OS_MD5 = "4f874b5c9dd9af23a393aa527b612e55"
-SYSCTL_MD5 = "5737397a77786735c9433006bed78cc4"
+SYSCTL_MD5 = "5c2a4ad4098ec15f171d36b68841de40"
 
 
 # Functions
@@ -160,6 +162,13 @@ def parse_arguments():
         default=True)
 
     parser.add_argument(
+        '--no-tuned-check',
+        action='store_false',
+        dest='tuned_check',
+        help='Does not run tuned checks',
+        default=True)
+
+    parser.add_argument(
         '--toolkit',
         action='store_true',
         dest='toolkit_run',
@@ -185,6 +194,7 @@ def parse_arguments():
             args.storage_check,
             args.net_check,
             args.sysctl_check,
+            args.tuned_check,
             args.toolkit_run)
 
 
@@ -568,6 +578,7 @@ def unique_list(inputlist):
 
 
 def check_os_redhat(os_dictionary):
+    redhat8 = False
     fatal_error = False
     # Check redhat-release vs dictionary list
     redhat_distribution = platform.linux_distribution()
@@ -583,8 +594,11 @@ def check_os_redhat(os_dictionary):
     redhat_distribution_str = redhat_distribution[0] + \
         " " + version_string
 
+    if version_string.startswith("8."):
+        redhat8 = True
+
     error_message = ERROR + LOCAL_HOSTNAME + " " + \
-        redhat_distribution_str + " is not a supported OS to run ECE"
+        redhat_distribution_str + " is not a supported OS to run ECE\n"
     try:
         if os_dictionary[redhat_distribution_str] == 'OK':
             print(
@@ -603,13 +617,13 @@ def check_os_redhat(os_dictionary):
                 " to run ECE." +
                 " See Spectrum Scale FAQ for restrictions.")
         else:
-            print(error_message)
+            sys.exit(error_message)
             fatal_error = True
     except BaseException:
-        print(error_message)
+        sys.exit(error_message)
         fatal_error = True
 
-    return fatal_error, redhat_distribution_str
+    return fatal_error, redhat_distribution_str, redhat8
 
 
 def get_json_versions(
@@ -759,6 +773,36 @@ def check_NVME_disks():
     return fatal_error, drives_dict
 
 
+def tuned_adm_check():
+    errors = 0
+    try: #Can we run tune-adm?
+        return_code = subprocess.call(['tuned-adm','active'],stdout=DEVNULL, stderr=DEVNULL)
+    except:
+        sys.exit(ERROR + LOCAL_HOSTNAME + " cannot run tuned-adm. It is a needed package for this tool\n") # Not installed or else.
+
+    tuned_adm = subprocess.Popen(['tuned-adm', 'active'], stdout=subprocess.PIPE)
+    tuned_adm.wait()
+    grep_rc_tuned = subprocess.call(['grep', 'Current active profile: throughput-performance'], stdin=tuned_adm.stdout, stdout=DEVNULL, stderr=DEVNULL)
+
+    if grep_rc_tuned == 0: # throughput-performance profile is active
+        print(INFO + LOCAL_HOSTNAME + " current active profile is throughput-performance")
+    else: #Some error
+        print(ERROR + LOCAL_HOSTNAME + "current active profile is not throughput-performance")
+        errors = errors + 1
+
+    #try: #Is it fully matching?
+    return_code = subprocess.call(['tuned-adm','verify'],stdout=DEVNULL, stderr=DEVNULL)
+    #except:
+    if return_code == 1:
+        print(ERROR + LOCAL_HOSTNAME + " tuned profile is *NOT* fully matching the active profile")
+        errors = errors + 1
+
+    if return_code == 0:
+        print(INFO + LOCAL_HOSTNAME + " tuned is matching the active profile")
+
+    return errors
+
+
 def check_SAS(SAS_dictionary):
     fatal_error = False
     check_disks = False
@@ -837,9 +881,7 @@ def exec_cmd(command):
     try:
         run_cmd = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE)
         cmd_output, cmd_stderr = run_cmd.communicate()
-        #run_cmd.wait()
-        #cmd_output = run_cmd.stdout.read()
-        return cmd_output
+        return cmd_output.strip()
 
     except BaseException:
         sys.exit(
@@ -948,19 +990,21 @@ def check_WCE_NVME(NVME_dict):
         try:
             if PYTHON3:
                 rc, write_cache_drive = subprocess.getstatusoutput(
-                    '/usr/bin/sdparm -g WCE=1 -H ' + os_device)
+                    '/usr/bin/sginfo -c ' + os_device +
+                    "| grep 'Write Cache' | awk {'print$4'}")
             else:
                 rc, write_cache_drive = commands.getstatusoutput(
-                    '/usr/bin/sdparm -g WCE=1 -H ' + os_device)
+                    '/usr/bin/sginfo -c ' + os_device +
+                    "| grep 'Write Cache' | awk {'print$4'}")
         except BaseException:
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
                 " cannot read WCE status for NVMe devices")
 
-        # if WCE is not supported on device the we expect nonzero rc
+        # if WCE is not supported on device then we expect nonzero rc
         if rc == 0:
-            wce_drive_enabled = bool(int(write_cache_drive, 16))
+            wce_drive_enabled = bool(int(write_cache_drive))
             NVME_dict[drive].append(wce_drive_enabled)
 
         if wce_drive_enabled:
@@ -1014,10 +1058,12 @@ def check_WCE_SAS(SAS_drives_dict):
         try:
             if PYTHON3:
                 rc, write_cache_drive = subprocess.getstatusoutput(
-                    '/usr/bin/sdparm -g WCE=1 -H /dev/' + os_device)
+                    '/usr/bin/sginfo -c /dev/' + os_device +
+                    "| grep 'Write Cache' | awk {'print$4'}")
             else:
                 rc, write_cache_drive = commands.getstatusoutput(
-                    '/usr/bin/sdparm -g WCE=1 -H /dev/' + os_device)
+                    '/usr/bin/sginfo -c /dev/' + os_device +
+                    "| grep 'Write Cache' | awk {'print$4'}")
         except BaseException:
             sys.exit(
                 ERROR +
@@ -1026,7 +1072,7 @@ def check_WCE_SAS(SAS_drives_dict):
 
         # if WCE is not supported on device the we expect nonzero rc
         if rc == 0:
-            wce_drive_enabled = bool(int(write_cache_drive, 16))
+            wce_drive_enabled = bool(int(write_cache_drive))
             SAS_drives_dict[drive].append(wce_drive_enabled)
 
         if wce_drive_enabled:
@@ -1270,9 +1316,11 @@ def print_summary_standalone(
         mem_gb,
         num_dimms,
         empty_dimms,
+        SAS_model,
         number_of_HDD_drives,
         number_of_SSD_drives,
         number_of_NVME_drives,
+        NIC_model,
         device_speed,
         all_checks_on):
     # This is not being run from the toolkit so lets write a more human summary
@@ -1297,9 +1345,11 @@ def print_summary_standalone(
     print("\t\tMemory: " + str(mem_gb) + " GBytes")
     print("\t\tDIMM slots: " + str(num_dimms))
     print("\t\tDIMM slots in use: " + str(num_dimms - empty_dimms))
+    print("\t\tSAS HBAs in use: " + ', '.join(SAS_model))
     print("\t\tJBOD SAS HDD drives: " + str(number_of_HDD_drives))
     print("\t\tJBOD SAS SSD drives: " + str(number_of_SSD_drives))
     print("\t\tNVMe drives: " + str(number_of_NVME_drives))
+    print("\t\tHCAs in use: " + ', '.join(NIC_model))
     print("\t\tLink speed: " + str(device_speed))
     print("\t\tRun ended at " + str(end_time_date))
     print("")
@@ -1343,6 +1393,7 @@ def main():
         storage_check,
         net_check,
         sysctl_check,
+        tuned_check,
         toolkit_run) = parse_arguments()
 
     if (cpu_check and md5_check and mem_check and os_check and packages_ch
@@ -1460,11 +1511,16 @@ def main():
 
     # Check linux_distribution
     redhat_distribution_str = "NOT CHECKED"
+    # Need this part out of OS check in case it is disabled by user
+    redhat_distribution = platform.linux_distribution()
+    version_string = redhat_distribution[1]
+    redhat8 = version_string.startswith("8.")
+    # End of RHEL8 out of OS check
     if os_check:
         linux_distribution = check_distribution()
         outputfile_dict['linux_distribution'] = linux_distribution
         if linux_distribution in ["redhat", "centos"]:
-            fatal_error, redhat_distribution_str = check_os_redhat(
+            fatal_error, redhat_distribution_str, redhat8 = check_os_redhat(
                 os_dictionary)
             if fatal_error:
                 nfatal_errors = nfatal_errors + 1
@@ -1475,6 +1531,19 @@ def main():
                 ERROR +
                 LOCAL_HOSTNAME +
                 " cannot determine Linux distribution\n")
+    # Fail if redhat8 + python2
+    if toolkit_run:
+        if redhat8 :
+            print(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " this tool cannot run on RHEL8")
+    else:
+        if redhat8:
+            sys.exit(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " this tool cannot run on RHEL8, please check the README\n")
 
     # Check packages
     if packages_ch:
@@ -1536,13 +1605,13 @@ def main():
                 # Extra information to the JSON
                 call_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call show all j")
-                outputfile_dict['storcli_call'] = call_all
+                outputfile_dict['storcli_call'] = json.loads(call_all)
                 call_eall_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call/eall show all j")
-                outputfile_dict['storcli_call_eall'] = call_eall_all
+                outputfile_dict['storcli_call_eall'] = json.loads(call_eall_all)
                 call_sall_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j")
-                outputfile_dict['storcli_call_sall_all'] = call_sall_all
+                outputfile_dict['storcli_call_sall_all'] = json.loads(call_sall_all)
                 # Checks start
                 HDD_error, n_HDD_drives, HDD_dict = check_SAS_disks("HDD")
                 outputfile_dict['HDD_fatal_error'] = HDD_error
@@ -1682,6 +1751,15 @@ def main():
                 " is not a valid IP address")
             nfatal_errors = nfatal_errors + 1
 
+    # Check tuned
+    if tuned_check:
+        fatal_error = tuned_adm_check()
+        if fatal_error:
+            nfatal_errors = nfatal_errors + 1
+            outputfile_dict['tuned_fail'] = True
+        else:
+            outputfile_dict['tuned_fail'] = False
+
     # Check sysctl
     if sysctl_check:
         fatal_error, sysctl_errors, sysctl_right, sysctl_wrong = check_sysctl(
@@ -1699,19 +1777,32 @@ def main():
         outputfile_dict['ECE_node_ready'] = True
 
     # Save lspci output to JSON
+    lspci_dict = dict()
     lspci_output = exec_cmd("lspci")
-    outputfile_dict['lspci'] = lspci_output
+    for line in lspci_output.split('\n'):
+        try:
+            pcimatch = PCIPATT.match(line)
+            key = pcimatch.group('pciaddr')
+            value = pcimatch.group('pcival')
+            lspci_dict[key] = value
+
+        # continue if we can't parse lspci data
+        # this data is saved best effort only
+        except Exception:
+            continue
+
+    outputfile_dict['lspci'] = lspci_dict
 
     # Exit protocol
     DEVNULL.close()
 
     outputfile_name = path + ip_address + ".json"
-    outputfile = open(outputfile_name, "w")
     end_time_date = datetime.datetime.now()
     outputfile_dict['end_time'] = str(end_time_date)
-    outputfile_json = json.dumps(outputfile_dict)
-    outputfile.write(outputfile_json)
-    outputfile.close()
+    outputdata = json.dumps(outputfile_dict, sort_keys=True, indent=4,
+                            separators=(',', ': '))
+    with open(outputfile_name, "w") as outputfile:
+        outputfile.write(outputdata)
 
     if toolkit_run and nfatal_errors > 0:
         print_summary_toolkit(sysctl_errors)
@@ -1729,9 +1820,11 @@ def main():
             mem_gb,
             num_dimms,
             empty_dimms,
+            SAS_model,
             n_HDD_drives,
             n_SSD_drives,
             n_NVME_drives,
+            NIC_model,
             device_speed,
             all_checks_on)
 
