@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.11"
+MOR_VERSION = "1.15"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -58,17 +58,31 @@ PCIPATT = re.compile('(?P<pciaddr>[a-fA-f0-9]{2}:[a-fA-f0-9]{2}[\.][0-9])'
 try:
     import dmidecode
 except ImportError:
-    sys.exit(
-        ERROR +
-        LOCAL_HOSTNAME +
-        " cannot import dmidecode, please check python-dmidecode is installed")
+    if PYTHON3:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot import dmidecode, please check python3-dmidecode" +
+            " is installed")
+    else:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot import dmidecode, please check python-dmidecode" +
+            " is installed")
 try:
     import ethtool
 except ImportError:
-    sys.exit(
-        ERROR +
-        LOCAL_HOSTNAME +
-        " cannot import ethtool, please check python-ethtool is installed")
+    if PYTHON3:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot import ethtool, please check python3-ethtool is installed")
+    else:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot import ethtool, please check python-ethtool is installed")
 
 # devnull redirect destination
 DEVNULL = open(os.devnull, 'w')
@@ -78,8 +92,8 @@ HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "e6a2dd14073e9f2c86937196e199bf71"
 SAS_ADAPTERS_MD5 = "5a7dc0746cb1fe1b218b655800c0a0ee"
-SUPPORTED_OS_MD5 = "4f874b5c9dd9af23a393aa527b612e55"
-SYSCTL_MD5 = "5c2a4ad4098ec15f171d36b68841de40"
+SUPPORTED_OS_MD5 = "45aa18dcb1fe3518c47150f552e851d9"
+SYSCTL_MD5 = "156c68801284e6d632b172d1bc383d2c"
 
 
 # Functions
@@ -528,13 +542,17 @@ def check_memory(min_gb_ram):
         # Avoiding 'System Board Or Motherboard'. Need more data
         if m_slots[slot]['data']['Error Information Handle'] == 'Not Provided':
             continue
-        dimms[m_slots[slot]['data']['Locator']
-              ] = m_slots[slot]['data']['Size']
+        try:
+            dimms[m_slots[slot]['data']['Locator']] = m_slots[slot]['data']['Size']
+        except BaseException:
+            continue
     empty_dimms = 0
     num_dimms = len(dimms)
     dimm_size = {}
     for dimm in dimms.keys():
         if dimms[dimm] is None:
+            empty_dimms = empty_dimms + 1
+        elif dimms[dimm] == "NO DIMM":
             empty_dimms = empty_dimms + 1
         else:
             dimm_size[dimm] = dimms[dimm]
@@ -558,8 +576,7 @@ def check_memory(min_gb_ram):
         print(
             INFO +
             LOCAL_HOSTNAME +
-            " all populated DIMM slots have same memory size of " +
-            main_memory_size[0])
+            " all populated DIMM slots have same memory size")
     else:
         print(
             ERROR +
@@ -831,7 +848,8 @@ def check_SAS(SAS_dictionary):
                             " adapter which is supported by ECE. The disks " +
                             "under this SAS adapter could be used by ECE")
                         found_SAS = True
-                        check_disks = True
+                        # Lets not yet enable this check for "all" disks
+                        # check_disks = True
                         SAS_model.append(SAS)
                     elif SAS_dictionary[SAS] == "WARN":
                         print(
@@ -840,10 +858,11 @@ def check_SAS(SAS_dictionary):
                             " has " +
                             SAS +
                             " adapter which is NOT supported by ECE. The" +
-                            " disks under this SAS adapter will still be " +
+                            " disks under this SAS adapter will not be" +
                             " checked for use by ECE")
                         found_SAS = False
-                        check_disks = True
+                        # Lets not yet enable this check for "all" disks
+                        # check_disks = True
                         SAS_model.append(SAS)
                     else:
                         print(
@@ -1004,8 +1023,12 @@ def check_WCE_NVME(NVME_dict):
 
         # if WCE is not supported on device then we expect nonzero rc
         if rc == 0:
-            wce_drive_enabled = bool(int(write_cache_drive))
-            NVME_dict[drive].append(wce_drive_enabled)
+            try:
+                wce_drive_enabled = bool(int(write_cache_drive))
+                NVME_dict[drive].append(wce_drive_enabled)
+            except BaseException:
+                # It gave RC0 but it has not such feature
+                wce_drive_enabled = False
 
         if wce_drive_enabled:
             print(
@@ -1232,8 +1255,13 @@ def check_sysctl(sysctl_dictionary):
             # comparision
             recommended_value = int(recommended_value_str.replace(" ", ""))
             try:
-                current_value_str = subprocess.check_output(
-                    ['sysctl', '-n', sysctl], stderr=subprocess.STDOUT)
+                if PYTHON3:
+                    current_value_str = subprocess.getoutput(
+                        'sysctl -n ' + sysctl)
+                else:
+                    current_value_str = subprocess.check_output(
+                        ['sysctl', '-n', sysctl], stderr=subprocess.STDOUT)
+
                 current_value_str = current_value_str.replace(
                     "\t", " ").replace("\n", "")
                 # Need to clean the entries that have spaces for integer
@@ -1270,7 +1298,7 @@ def check_sysctl(sysctl_dictionary):
                     LOCAL_HOSTNAME +
                     " " +
                     sysctl +
-                    "current value does not exists")
+                    " current value does not exists")
                 errors = errors + 1
                 fatal_error = True
     return fatal_error, errors, sysctl_right, sysctl_wrong
@@ -1533,17 +1561,18 @@ def main():
                 " cannot determine Linux distribution\n")
     # Fail if redhat8 + python2
     if toolkit_run:
-        if redhat8 :
+        if redhat8 and (not PYTHON3):
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
-                " this tool cannot run on RHEL8")
+                " this tool cannot run on RHEL8 and Python 2\n")
     else:
-        if redhat8:
+        if redhat8 and (not PYTHON3):
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
-                " this tool cannot run on RHEL8, please check the README\n")
+                " this tool cannot run on RHEL8 and Python 2, " +
+                "please check the README\n")
 
     # Check packages
     if packages_ch:
@@ -1779,17 +1808,19 @@ def main():
     # Save lspci output to JSON
     lspci_dict = dict()
     lspci_output = exec_cmd("lspci")
-    for line in lspci_output.split('\n'):
-        try:
-            pcimatch = PCIPATT.match(line)
-            key = pcimatch.group('pciaddr')
-            value = pcimatch.group('pcival')
-            lspci_dict[key] = value
-
-        # continue if we can't parse lspci data
-        # this data is saved best effort only
-        except Exception:
-            continue
+    if not PYTHON3:
+        for line in lspci_output.split('\n'):
+            try:
+                pcimatch = PCIPATT.match(line)
+                key = pcimatch.group('pciaddr')
+                value = pcimatch.group('pcival')
+                lspci_dict[key] = value
+                # continue if we can't parse lspci data
+                # this data is saved best effort only
+            except Exception:
+                continue
+    else:
+        lspci_dict["python3"] = True
 
     outputfile_dict['lspci'] = lspci_dict
 
@@ -1799,7 +1830,7 @@ def main():
     outputfile_name = path + ip_address + ".json"
     end_time_date = datetime.datetime.now()
     outputfile_dict['end_time'] = str(end_time_date)
-    outputdata = json.dumps(outputfile_dict, sort_keys=True, indent=4,
+    outputdata = json.dumps(str(outputfile_dict), sort_keys=True, indent=4,
                             separators=(',', ': '))
     with open(outputfile_name, "w") as outputfile:
         outputfile.write(outputdata)

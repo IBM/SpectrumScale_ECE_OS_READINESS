@@ -2,10 +2,17 @@ This tool assesses the readiness of a single node to run IBM Spectrum Scale Eras
 
 This tool is run when installing ECE with the Spectrum Scale toolkit, it is used by the toolkit to do a more comprehensive inter node checking from a cluster perspective, this tool does only check at node level. Each run it generates a JSON file with name IP_ADDRESS.json where some data is saved, on standalone mode this file is only for reference.
 
+**IMPORTANT**
+This tool is does not overrule the official documentation of the product. The requiriments stated on the official documenation are the authoritative ones as [Minimum hardware requirements and precheck](https://www.ibm.com/support/knowledgecenter/STXKQY_ECE_5.0.4/com.ibm.spectrum.scale.ece.v5r04.doc/b1lece_min_hwrequirements.html)
 
-**Running on RHEL 8.x Systems**
-This tool cannot run at this moment on RHEL 8 systems. Due dependancies that are not yet available on RHEL 8 series. Please fall back to manual
-checking using the following Knowledge Center page as base [Spectrum Scale ECE HW requirements](https://www.ibm.com/support/knowledgecenter/en/STXKQY_ECE_5.0.3/com.ibm.spectrum.scale.ece.v5r03.doc/b1lece_min_hwrequirements.htm)
+**Known limitations**
+- Current code only works correctly if the system has one or none SAS cards. It does not properly work with more than one SAS card yet. Results cannot be trusted when more than one SAS card is on the system. This is plan to be addressed on future builds
+- On RHEL 8 series there is a warning message at the end of the run, this is due the current version of dmidecode and python modules that are shipped with RHEL from OS upstream. When the version catch up on the OS upstream repositories that message would go away. The below waring an be ignored for now.
+```
+# SMBIOS implementations newer than version 2.7 are not
+# fully supported by this version of dmidecode.
+```
+- This tool can run on RHEL 8 systems only with python3. This is due to dependencies that are not available on RHEL 8 series and python2.
 
 **PREREQUISITES:** Before running this tool you **must** install the software prerequisites. Those are:
  * RPM packages that are listed on on packages.json file.
