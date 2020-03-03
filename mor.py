@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.15"
+MOR_VERSION = "1.19"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -91,7 +91,7 @@ DEVNULL = open(os.devnull, 'w')
 HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "e6a2dd14073e9f2c86937196e199bf71"
-SAS_ADAPTERS_MD5 = "5a7dc0746cb1fe1b218b655800c0a0ee"
+SAS_ADAPTERS_MD5 = "a35cc1ed719d9ca6606bed345ed58824"
 SUPPORTED_OS_MD5 = "45aa18dcb1fe3518c47150f552e851d9"
 SYSCTL_MD5 = "156c68801284e6d632b172d1bc383d2c"
 
@@ -779,7 +779,7 @@ def check_NVME_disks():
             print(
                 WARNING +
                 LOCAL_HOSTNAME +
-                "not all NVMe devices have the same size")
+                " not all NVMe devices have the same size")
     except BaseException:
         fatal_error = True
         print(
@@ -790,9 +790,101 @@ def check_NVME_disks():
     return fatal_error, drives_dict
 
 
+def check_LBA_NVME(drives_dict):
+    #We need to check that LBA in use is the same in all drives or fail
+    fatal_error = False
+    lba_size_list = []
+    for drive_index in drives_dict.keys():
+        drive = drives_dict[drive_index][0]
+        try:
+            if PYTHON3:
+                lba_size = subprocess.getoutput("nvme id-ns " + drive + " | grep 'in use' | awk '{print$5}' | cut -c7-")
+            else:
+                lba_size = commands.getoutput("nvme id-ns " + drive + " | grep 'in use' | awk '{print$5}' | cut -c7-")
+        except BaseException:
+            fatal_error = True
+            print(
+                WARNING +
+                LOCAL_HOSTNAME +
+                " cannot query LBA on NVMe device " +
+                drive
+                )
+        lba_size_list.append(lba_size)
+    lba_unique_size = unique_list(lba_size_list)
+    if fatal_error == False:
+        if len(lba_unique_size) == 1:
+            print(
+                INFO +
+                LOCAL_HOSTNAME +
+                " all NVMe devices have the same LBA size")
+        else:
+            fatal_error = True
+            print(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " not all NVMe devices have the same LBA size")
+    return fatal_error
+
+
+def check_MD_NVME(drives_dict):
+    #We need to check that MD in use is the same in all drives or fail
+    fatal_error = False
+    md_size_list = []
+    for drive_index in drives_dict.keys():
+        drive = drives_dict[drive_index][0]
+        try:
+            if PYTHON3:
+                md_size = subprocess.getoutput("nvme id-ns " + drive + " | grep 'in use' | awk '{print$4}' | cut -c4-")
+            else:
+                md_size = commands.getoutput("nvme id-ns " + drive + " | grep 'in use' | awk '{print$4}' | cut -c4-")
+        except BaseException:
+            fatal_error = True
+            print(
+                WARNING +
+                LOCAL_HOSTNAME +
+                " cannot query metadata size on NVMe device " +
+                drive
+                )
+        md_size_list.append(md_size)
+    md_unique_size = unique_list(md_size_list)
+    if fatal_error == False:
+        if len(md_unique_size) == 1:
+            print(
+                INFO +
+                LOCAL_HOSTNAME +
+                " all NVMe devices have the same metadata size")
+            if md_size == "0":
+                print(
+                    INFO +
+                    LOCAL_HOSTNAME +
+                    " all NVMe devices have metadata size of zero")
+            else:
+                fatal_error = True
+                print(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " not all NVMe devices have metadata size of zero")
+        else:
+            fatal_error = True
+            print(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " not all NVMe devices have the same metadata size")
+    return fatal_error
+
+
 def tuned_adm_check():
     errors = 0
-    try: #Can we run tune-adm?
+    # Is tuned up?
+    try:  # Can we run tune-adm?
+        return_code = subprocess.call(['systemctl','is-active','tuned'],stdout=DEVNULL, stderr=DEVNULL)
+    except:
+        sys.exit(ERROR + LOCAL_HOSTNAME + " cannot run systemctl is-active tuned\n")
+    if return_code != 0:
+        print(ERROR + LOCAL_HOSTNAME + " tuned is not running")
+        errors = errors + 1
+        return errors
+    try:  # Can we run tune-adm?
         return_code = subprocess.call(['tuned-adm','active'],stdout=DEVNULL, stderr=DEVNULL)
     except:
         sys.exit(ERROR + LOCAL_HOSTNAME + " cannot run tuned-adm. It is a needed package for this tool\n") # Not installed or else.
@@ -1618,6 +1710,8 @@ def main():
     NVME_error = False
     SAS_but_no_usable_drives = False
     NVME_dict = {}
+    SAS_model = ""
+    
     if storage_check:
         SAS_fatal_error, check_disks, SAS_model = check_SAS(SAS_dictionary)
         outputfile_dict['error_SAS_card'] = SAS_fatal_error
@@ -1687,6 +1781,16 @@ def main():
             outputfile_dict['NVME_WCE_error'] = NVME_WCE_error
             if NVME_WCE_error:
                 nfatal_errors = nfatal_errors + 1
+            # All LBA NVME the same check
+            NVME_LBA_error = check_LBA_NVME(NVME_dict)
+            outputfile_dict['NVME_LBA_error'] = NVME_LBA_error
+            if NVME_LBA_error:
+                nfatal_errors = nfatal_errors + 1
+            # Metadata NVME check
+            NVME_MD_error = check_MD_NVME(NVME_dict)
+            outputfile_dict['NVME_MD_error'] = NVME_MD_error
+            if NVME_MD_error:
+                nfatal_errors = nfatal_errors + 1
 
         outputfile_dict['NVME_drives'] = NVME_dict
 
@@ -1736,11 +1840,13 @@ def main():
                     " drives that ECE can use")
 
     # Network checks
-    device_speed = "NOT CHECKED"
     outputfile_dict['local_hostname'] = LOCAL_HOSTNAME
     ip_address_is_IP = is_IP_address(ip_address)
     outputfile_dict['IP_address_is_possible'] = ip_address_is_IP
     outputfile_dict['ip_address'] = ip_address
+    NIC_model = ""
+    device_speed = "NOT CHECKED"
+
     if net_check:
         fatal_error, NIC_model = check_NIC(NIC_dictionary)
         outputfile_dict['error_NIC_card'] = fatal_error
