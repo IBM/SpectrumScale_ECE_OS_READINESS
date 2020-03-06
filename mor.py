@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.20"
+MOR_VERSION = "1.21"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -403,6 +403,21 @@ def check_NIC_speed(net_interface, min_link_speed):
             net_interface +
             ". Is the link up?")
     return fatal_error, device_speed
+
+
+def check_root_user():
+    effective_uid = os.getuid()
+    if effective_uid == 0:
+        print(
+            GREEN +
+            "OK: " +
+            NOCOLOR +
+            "the tool is being run as root")
+    else:
+        sys.exit(RED +
+                 "QUIT: " +
+                 NOCOLOR +
+                 "this tool needs to be run as root\n")
 
 
 def packages_check(packages_dictionary):
@@ -1612,6 +1627,9 @@ def main():
         min_gb_ram,
         max_drives,
         min_link_speed]
+
+    # Check root
+    check_root_user()
 
     # Check cpu
     current_processor = "NOT CHECKED"
