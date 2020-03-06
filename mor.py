@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.19"
+MOR_VERSION = "1.20"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -393,6 +393,7 @@ def check_NIC_speed(net_interface, min_link_speed):
                 " has a link of " +
                 device_speed +
                 " Mb/s. Which is not supported to run ECE")
+            fatal_error = True
     except BaseException:
         fatal_error = True
         print(
