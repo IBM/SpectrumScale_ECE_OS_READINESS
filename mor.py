@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.21"
+MOR_VERSION = "1.22"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -1517,6 +1517,9 @@ def main():
 
     # Start time
     outputfile_dict['start_time'] = str(start_time_date)
+
+    # Save script version into JSON
+    outputfile_dict['MOR_VERSION'] = MOR_VERSION
 
     # Parse ArgumentParser
     (ip_address,
