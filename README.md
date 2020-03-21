@@ -7,7 +7,7 @@ This tool is does not overrule the official documentation of the product. The re
 
 **Known limitations**
 - Current code only works correctly if the system has one or none SAS cards. It does not properly work with more than one SAS card yet. Results cannot be trusted when more than one SAS card is on the system. This is plan to be addressed on future builds
-- On RHEL 8 series there is a warning message at the end of the run, this is due the current version of dmidecode and python modules that are shipped with RHEL from OS upstream. When the version catch up on the OS upstream repositories that message would go away. The below waring an be ignored for now.
+- On RHEL 8 series there is a warning message at the end of the run, this is due the current version of dmidecode and python modules that are shipped with RHEL from OS upstream. When the version catch up on the OS upstream repositories that message would go away. The below warning can be ignored for now.
 ```
 # SMBIOS implementations newer than version 2.7 are not
 # fully supported by this version of dmidecode.
@@ -15,10 +15,11 @@ This tool is does not overrule the official documentation of the product. The re
 - This tool can run on RHEL 8 systems only with python3. This is due to dependencies that are not available on RHEL 8 series and python2.
 
 **PREREQUISITES:** Before running this tool you **must** install the software prerequisites. Those are:
- * RPM packages that are listed on on packages.json file.
+ * RPM packages that are listed on on packages.json file with a value of 0.
  * python-dmidecode and python-ethtool RPM packages.
- * nvme-cli RPM package if NVME are drive[s] exists in the system
+ * nvme-cli RPM package if NVME drive[s] exists in the system
  * storcli if SAS card[s] exists in the system
+ * megacli is not supported by ECE nor this tool as stated on the above linked "Minimum hardware requirements and precheck"
 
 The tool requires one parameter (--ip) to be passed, it has to be the local IP where RAID traffic is going to happen. It does not allow names of a node it must be an IPv4 address
 
