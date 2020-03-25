@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.23"
+MOR_VERSION = "1.24"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -99,6 +99,14 @@ SYSCTL_MD5 = "156c68801284e6d632b172d1bc383d2c"
 # Functions
 def parse_arguments():
     parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        '--FIPS',
+        action='store_true',
+        dest='fips',
+        help='Does not run parts of the code that cannot run on FIPS systems. ' +
+        'The run with this parameter is not valid for acceptance.',
+        default=False)
 
     parser.add_argument(
         '--ip',
@@ -198,7 +206,8 @@ def parse_arguments():
 
     args = parser.parse_args()
 
-    return (args.ip_address,
+    return (args.fips,
+            args.ip_address,
             args.path,
             args.cpu_check,
             args.md5_check,
@@ -1520,7 +1529,8 @@ def main():
     outputfile_dict['MOR_VERSION'] = MOR_VERSION
 
     # Parse ArgumentParser
-    (ip_address,
+    (fips_mode,
+        ip_address,
         path,
         cpu_check,
         md5_check,
@@ -1539,25 +1549,42 @@ def main():
     else:
         all_checks_on = False
 
-    # JSON loads and store MD5
+    # JSON loads and calculate and store MD5
     os_dictionary = load_json(path + "supported_OS.json")
-    supported_OS_md5 = md5_chksum(path + "supported_OS.json")
-    outputfile_dict['supported_OS_md5'] = supported_OS_md5
     sysctl_dictionary = load_json(path + "sysctl.json")
-    sysctl_md5 = md5_chksum(path + "sysctl.json")
-    outputfile_dict['sysctl_md5'] = sysctl_md5
     packages_dictionary = load_json(path + "packages.json")
-    packages_md5 = md5_chksum(path + "packages.json")
-    outputfile_dict['packages_md5'] = packages_md5
     SAS_dictionary = load_json(path + "SAS_adapters.json")
-    SAS_adapters_md5 = md5_chksum(path + "SAS_adapters.json")
-    outputfile_dict['SAS_adapters_md5'] = SAS_adapters_md5
     NIC_dictionary = load_json(path + "NIC_adapters.json")
-    NIC_adapters_md5 = md5_chksum(path + "NIC_adapters.json")
-    outputfile_dict['NIC_adapters_md5'] = NIC_adapters_md5
     HW_dictionary = load_json(path + "HW_requirements.json")
-    HW_requirements_md5 = md5_chksum(path + "HW_requirements.json")
+    
+    if fips_mode:
+        print(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " This is running with FIPS mode enabled.")
+        nfatal_errors = nfatal_errors + 1
+        md5_check = False
+        supported_OS_md5 = "FIPS"
+        sysctl_md5 = "FIPS"
+        packages_md5 = "FIPS"
+        SAS_adapters_md5 = "FIPS"
+        NIC_adapters_md5 = "FIPS"
+        HW_requirements_md5 = "FIPS"
+    else:
+        supported_OS_md5 = md5_chksum(path + "supported_OS.json")
+        sysctl_md5 = md5_chksum(path + "sysctl.json")
+        packages_md5 = md5_chksum(path + "packages.json")
+        SAS_adapters_md5 = md5_chksum(path + "SAS_adapters.json")
+        NIC_adapters_md5 = md5_chksum(path + "NIC_adapters.json")
+        HW_requirements_md5 = md5_chksum(path + "HW_requirements.json")
+
+    outputfile_dict['supported_OS_md5'] = supported_OS_md5
+    outputfile_dict['sysctl_md5'] = sysctl_md5
+    outputfile_dict['packages_md5'] = packages_md5
+    outputfile_dict['SAS_adapters_md5'] = SAS_adapters_md5
+    outputfile_dict['NIC_adapters_md5'] = NIC_adapters_md5
     outputfile_dict['HW_requirements_md5'] = HW_requirements_md5
+
 
     # Check MD5 hashes. Files are already checked that exists and load JSON
     passed_md5_supported_os = md5_verify(

@@ -25,13 +25,16 @@ The tool requires one parameter (--ip) to be passed, it has to be the local IP w
 
 ```
 # ./mor.py -h
-usage: mor.py [-h] --ip IPv4_ADDRESS [--path PATH/] [--no-cpu-check]
+usage: mor.py [-h] [--FIPS] --ip IPv4_ADDRESS [--path PATH/] [--no-cpu-check]
               [--no-md5-check] [--no-mem-check] [--no-os-check]
               [--no-packages-check] [--no-net-check] [--no-storage-check]
               [--no-sysctl-check] [--no-tuned-check] [--toolkit] [-v]
 
 optional arguments:
   -h, --help           show this help message and exit
+  --FIPS               Does not run parts of the code that cannot run on FIPS
+                       systems. The run with this parameter is not valid for
+                       acceptance.
   --ip IPv4_ADDRESS    Local IP address linked to device used for NSD
   --path PATH/         Path where JSON files are located. Defaults to local
                        directory
