@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.24"
+MOR_VERSION = "1.25"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -93,7 +93,7 @@ NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "3bc8b63548de2e16fd9ce67adc073da1"
 SAS_ADAPTERS_MD5 = "a35cc1ed719d9ca6606bed345ed58824"
 SUPPORTED_OS_MD5 = "45aa18dcb1fe3518c47150f552e851d9"
-SYSCTL_MD5 = "156c68801284e6d632b172d1bc383d2c"
+SYSCTL_MD5 = "a540d4b1cd6cf1dac62cd1ca09eddb5a"
 
 
 # Functions
@@ -944,54 +944,111 @@ def check_SAS(SAS_dictionary):
     print(INFO + LOCAL_HOSTNAME + " checking SAS adapters")
     for SAS in SAS_dictionary:
         if SAS != "json_version":
-            try:
+            if False == False:
                 lspci_out = subprocess.Popen(['lspci'], stdout=subprocess.PIPE)
-                grep_rc_lspci = subprocess.call(
-                    ['grep', SAS],
-                    stdin=lspci_out.stdout,
-                    stdout=DEVNULL,
-                    stderr=DEVNULL)
-                lspci_out.wait()
-
+                grep_proc = subprocess.Popen(['grep', 'MegaRAID'], stdin=lspci_out.stdout, stdout=subprocess.PIPE)
+                grep_out_lspci, err = grep_proc.communicate()
+                if err != '':
+                    # We hit something unexpected
+                    fatal_error = True
+                SAS_p='\\b'+SAS+'\\b'
+                try:
+                    this_SAS = re.search(SAS_p,grep_out_lspci).group(0)
+                    SAS_var_is_OK = True
+                    grep_rc_lspci = 0
+                except BaseException:
+                    SAS_var_is_OK = False
+                    grep_rc_lspci = 1
                 if grep_rc_lspci == 0:  # We have this SAS, 1 or more
-                    if SAS_dictionary[SAS] == "OK":
-                        print(
-                            INFO +
-                            LOCAL_HOSTNAME +
-                            " has " +
-                            SAS +
-                            " adapter which is supported by ECE. The disks " +
-                            "under this SAS adapter could be used by ECE")
-                        found_SAS = True
-                        # Lets not yet enable this check for "all" disks
-                        # check_disks = True
-                        SAS_model.append(SAS)
-                    elif SAS_dictionary[SAS] == "WARN":
+                    if SAS_dictionary[SAS] == "OK":                       
+                        if SAS_var_is_OK:
+                            SAS_model.append(SAS)
+                            storcli_err = check_storcli()
+                            sas_speed_err = check_SAS_speed()
+                            if (storcli_err and sas_speed_err) == False:
+                                found_SAS = True
+                                check_disks = True
+                                print(
+                                    INFO +
+                                    LOCAL_HOSTNAME +
+                                    " has " +
+                                    SAS +
+                                    " adapter which is tested by ECE. The disks " +
+                                    "under this SAS adapter could be used by ECE"
+                                )
+                            if storcli_err:
+                                found_SAS = False
+                                print(
+                                    ERROR +
+                                    LOCAL_HOSTNAME +
+                                    " has " +
+                                    SAS +
+                                    " adapter that storcli cannot manage."
+                                )
+                            if sas_speed_err:
+                                found_SAS = False
+                                print(
+                                    ERROR +
+                                    LOCAL_HOSTNAME +
+                                    " has " +
+                                    SAS +
+                                    " adapter that has lower speed than needed"
+                                )
+                    elif SAS_dictionary[SAS] == "NOK":
                         print(
                             ERROR +
                             LOCAL_HOSTNAME +
                             " has " +
                             SAS +
-                            " adapter which is NOT supported by ECE. The" +
-                            " disks under this SAS adapter will not be" +
-                            " checked for use by ECE")
-                        found_SAS = False
+                            " adapter which is NOT supported by ECE.")
                         # Lets not yet enable this check for "all" disks
                         # check_disks = True
                         SAS_model.append(SAS)
+                        fatal_error = True
+                        found_SAS = False
                     else:
                         print(
-                            ERROR +
+                            WARNING +
                             LOCAL_HOSTNAME +
                             " has " +
                             SAS +
-                            " adapter which is explicitly not supported by " +
-                            "ECE. The disks under this SAS adapter cannot " +
-                            "be used by ECE")
-                        found_SAS = False
-                        check_disks = False
-                        SAS_model.append(SAS)
-            except BaseException:
+                            " adapter which has not been tested.")
+                        SAS_model.append("NOT TESTED")
+                        storcli_err = check_storcli()
+                        sas_speed_err = check_SAS_speed()
+                        if (sas_speed_err and sas_speed_err) == False:
+                            found_SAS = True
+                            fatal_error = False
+                            check_disks = True
+                            print(
+                                INFO +
+                                LOCAL_HOSTNAME +
+                                " has " +
+                                SAS +
+                                " adapter which is supported by ECE. The disks " +
+                                "under this SAS adapter could be used by ECE"
+                            )
+                        if storcli_err:
+                            found_SAS = False
+                            fatal_error = True
+                            print(
+                                ERROR +
+                                LOCAL_HOSTNAME +
+                                " has " +
+                                SAS +
+                                " adapter that storcli cannot manage."
+                            )
+                        if sas_speed_err:
+                            found_SAS = False
+                            fatal_error = True
+                            print(
+                                ERROR +
+                                LOCAL_HOSTNAME +
+                                " has " +
+                                SAS +
+                                " adapter that has lower speed than required"
+                            )
+            else:
                 sys.exit(
                     ERROR +
                     LOCAL_HOSTNAME +
@@ -999,13 +1056,56 @@ def check_SAS(SAS_dictionary):
                     "determing SAS adapters")
 
     if not found_SAS:
-        print(
-            ERROR +
-            LOCAL_HOSTNAME +
-            " does not have any SAS adapter supported by ECE. The disks " +
-            "under any SAS adapter in this system cannot be used by ECE")
-        fatal_error = True
-
+        # We hit here is there is no SAS listed on the JSON or no SAS at all
+        try:
+            lspci_out = subprocess.Popen(['lspci'], stdout=subprocess.PIPE)
+            grep_proc = subprocess.Popen(['egrep', 'SAS|MegaRAID'], stdin=lspci_out.stdout, stdout=subprocess.PIPE)
+            grep_out_lspci, err = grep_proc.communicate()
+            if err != '':
+                # We hit something unexpected
+                fatal_error = True
+            if grep_out_lspci == '':
+                grep_rc_lspci = 1
+            else:
+                grep_rc_lspci = 0
+            if grep_rc_lspci == 0: # We have some SAS
+                print(
+                    WARNING +
+                    LOCAL_HOSTNAME +
+                    " has a non tested SAS adapter")
+                #check_disks = True
+                SAS_model.append("NOT TESTED")
+                storcli_works = check_storcli()
+                sas_dev_int = check_SAS_speed()
+                if (storcli_works and sas_dev_int) == False:
+                    found_SAS = True
+                    check_disks = True
+                if storcli_works:
+                    found_SAS = False
+                    fatal_error = True
+                    print(
+                        ERROR +
+                        LOCAL_HOSTNAME +
+                        " has an adapter that storcli cannot manage.")
+                if sas_dev_int:
+                    found_SAS = False
+                    fatal_error = True
+                    print(
+                        ERROR +
+                        LOCAL_HOSTNAME +
+                        " has adapter that has lower speed than needed")    
+            else:
+                print(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " does not have any SAS adapter.")
+                fatal_error = True
+        except BaseException:
+                sys.exit(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " an undetermined error ocurred while " +
+                    "determing SAS adapters")
     return fatal_error, check_disks, SAS_model
 
 
@@ -1022,6 +1122,47 @@ def exec_cmd(command):
             ERROR +
             LOCAL_HOSTNAME +
             " cannot run " + str(command))
+
+
+def check_storcli():
+    try:
+        if PYTHON3:
+            sas_int = subprocess.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 show " +
+                "| grep Number | awk '{print$5}'")
+        else:
+            sas_int = commands.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 show " +
+                "| grep Number | awk '{print$5}'")
+        
+        if sas_int == '0':
+            fatal_error = True
+        else:
+            fatal_error = False
+    except BaseException:
+        fatal_error = True
+    return fatal_error
+
+
+def check_SAS_speed():
+    allowed_dev_int = ['SAS-12G']
+    try:
+        if PYTHON3:
+            sas_speed = subprocess.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 /call show " +
+                "| grep \"Device Interface\" | awk '{print $4}'")
+        else:
+            sas_speed = commands.getoutput(
+                "/opt/MegaRAID/storcli/storcli64 /call show " +
+                "| grep \"Device Interface\" | awk '{print $4}'")
+        
+        if sas_speed in allowed_dev_int:
+            fatal_error = False
+        else:
+            fatal_error = True
+    except BaseException:
+        fatal_error = True
+    return fatal_error
 
 
 def check_SAS_disks(device_type):

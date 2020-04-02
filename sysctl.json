@@ -1,6 +1,6 @@
 {
-  "json_version": "1.0",
+  "json_version": "1.1",
   "net.ipv4.tcp_window_scaling": "1",
   "net.ipv4.tcp_timestamps": "1",
-  "kernel.numa_balancing": "0"
+  "kernel.numa_balancing": "1"
 }
