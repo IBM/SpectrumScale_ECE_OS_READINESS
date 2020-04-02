@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.26"
+MOR_VERSION = "1.25"
 
 # GIT URL
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -944,7 +944,7 @@ def check_SAS(SAS_dictionary):
     print(INFO + LOCAL_HOSTNAME + " checking SAS adapters")
     for SAS in SAS_dictionary:
         if SAS != "json_version":
-            try:
+            if False == False:
                 lspci_out = subprocess.Popen(['lspci'], stdout=subprocess.PIPE)
                 grep_proc = subprocess.Popen(['grep', 'MegaRAID'], stdin=lspci_out.stdout, stdout=subprocess.PIPE)
                 grep_out_lspci, err = grep_proc.communicate()
@@ -961,7 +961,7 @@ def check_SAS(SAS_dictionary):
                     grep_rc_lspci = 1
                 if grep_rc_lspci == 0:  # We have this SAS, 1 or more
                     if SAS_dictionary[SAS] == "OK":                       
-               else         if SAS_var_is_OK:
+                        if SAS_var_is_OK:
                             SAS_model.append(SAS)
                             storcli_err = check_storcli()
                             sas_speed_err = check_SAS_speed()
@@ -1048,7 +1048,7 @@ def check_SAS(SAS_dictionary):
                                 SAS +
                                 " adapter that has lower speed than required"
                             )
-            except BaseException:
+            else:
                 sys.exit(
                     ERROR +
                     LOCAL_HOSTNAME +
