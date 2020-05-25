@@ -28,10 +28,11 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.27"
+MOR_VERSION = "1.35"
 
-# GIT URL
+# GIT URLs
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
+GITREPOURL_TUNED = "https://github.com/IBM/SpectrumScale_ECE_tuned_profile"
 
 # Colorful constants
 RED = '\033[91m'
@@ -70,6 +71,17 @@ except ImportError:
             LOCAL_HOSTNAME +
             " cannot import dmidecode, please check python-dmidecode" +
             " is installed")
+
+if PYTHON3:
+    try:
+        import distro
+    except ImportError:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot import distro, please check python3-distro" +
+            " is installed")
+
 try:
     import ethtool
 except ImportError:
@@ -92,9 +104,7 @@ HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "3bc8b63548de2e16fd9ce67adc073da1"
 SAS_ADAPTERS_MD5 = "a35cc1ed719d9ca6606bed345ed58824"
-SUPPORTED_OS_MD5 = "45aa18dcb1fe3518c47150f552e851d9"
-SYSCTL_MD5 = "a540d4b1cd6cf1dac62cd1ca09eddb5a"
-
+SUPPORTED_OS_MD5 = "e2ba7ec027c594af2d6618a25b20a4d1"
 
 # Functions
 def parse_arguments():
@@ -105,7 +115,7 @@ def parse_arguments():
         action='store_true',
         dest='fips',
         help='Does not run parts of the code that cannot run on FIPS systems. ' +
-        'The run with this parameter is not valid for acceptance.',
+        'The run with this parameter is not complete and cannot be used for acceptance.',
         default=False)
 
     parser.add_argument(
@@ -177,13 +187,6 @@ def parse_arguments():
         default=True)
 
     parser.add_argument(
-        '--no-sysctl-check',
-        action='store_false',
-        dest='sysctl_check',
-        help='Does not run sysctl checks',
-        default=True)
-
-    parser.add_argument(
         '--no-tuned-check',
         action='store_false',
         dest='tuned_check',
@@ -216,7 +219,6 @@ def parse_arguments():
             args.packages_ch,
             args.storage_check,
             args.net_check,
-            args.sysctl_check,
             args.tuned_check,
             args.toolkit_run)
 
@@ -292,7 +294,6 @@ def show_header(moh_version, json_version, toolkit_run):
         LOCAL_HOSTNAME +
         " \tsupported OS:\t\t" +
         json_version['supported_OS'])
-    print(INFO + LOCAL_HOSTNAME + " \tsysctl: \t\t" + json_version['sysctl'])
     print(
         INFO +
         LOCAL_HOSTNAME +
@@ -668,7 +669,6 @@ def check_os_redhat(os_dictionary):
 
 def get_json_versions(
         os_dictionary,
-        sysctl_dictionary,
         packages_dictionary,
         SAS_dictionary,
         NIC_dictionary,
@@ -685,14 +685,6 @@ def get_json_versions(
             ERROR +
             LOCAL_HOSTNAME +
             " cannot load version from supported OS JSON")
-
-    try:
-        json_version['sysctl'] = sysctl_dictionary['json_version']
-    except BaseException:
-        sys.exit(
-            ERROR +
-            LOCAL_HOSTNAME +
-            " cannot load version from sysctl JSON")
 
     try:
         json_version['packages'] = packages_dictionary['json_version']
@@ -778,19 +770,19 @@ def check_NVME_disks():
     fatal_error = False
     try:
         if PYTHON3:
-            drives = subprocess.getoutput("nvme list | grep nvme").split('\n')
+            drives_raw = subprocess.getoutput("nvme list -o json")
         else:
-            drives = commands.getoutput("nvme list | grep nvme").split('\n')
+            drives_raw = commands.getoutput("nvme list -o json")
         drives_dict = {}
         drives_size_list = []
-        for single_drive in drives:
-            list_single_drive = single_drive.split()
-            drives_dict[list_single_drive[1]] = [list_single_drive[0],
-                                                 list_single_drive[2],
-                                                 list_single_drive[4],
-                                                 list_single_drive[5],
-                                                 list_single_drive[14]]
-            drives_size_list.append(list_single_drive[4])
+        drives = json.loads(drives_raw)
+        for single_drive in drives['Devices']:
+            drives_dict[single_drive['Index']] = [single_drive['DevicePath'],
+                                                 single_drive['ModelNumber'],
+                                                 single_drive['PhysicalSize'],
+                                                 single_drive['Firmware'],
+                                                 single_drive['SerialNumber']]
+            drives_size_list.append(single_drive['PhysicalSize'])
         drives_unique_size = unique_list(drives_size_list)
         if len(drives_unique_size) == 1:
             print(
@@ -901,36 +893,45 @@ def tuned_adm_check():
     # Is tuned up?
     try:  # Can we run tune-adm?
         return_code = subprocess.call(['systemctl','is-active','tuned'],stdout=DEVNULL, stderr=DEVNULL)
-    except:
+    except BaseException:
         sys.exit(ERROR + LOCAL_HOSTNAME + " cannot run systemctl is-active tuned\n")
     if return_code != 0:
         print(ERROR + LOCAL_HOSTNAME + " tuned is not running")
         errors = errors + 1
         return errors
+    # Lets have a clean start by restarting the daemon
+    try:
+        rc_restart = subprocess.call(['systemctl','restart','tuned'],stdout=DEVNULL, stderr=DEVNULL)
+    except BaseException:
+        sys.exit(ERROR + LOCAL_HOSTNAME + " cannot run systemctl restart tuned\n")
+    if rc_restart != 0:
+        print(ERROR + LOCAL_HOSTNAME + " cannot restart tuned")
+        errors = errors + 1
+        return errors
     try:  # Can we run tune-adm?
         return_code = subprocess.call(['tuned-adm','active'],stdout=DEVNULL, stderr=DEVNULL)
-    except:
+    except BaseException:
         sys.exit(ERROR + LOCAL_HOSTNAME + " cannot run tuned-adm. It is a needed package for this tool\n") # Not installed or else.
 
     tuned_adm = subprocess.Popen(['tuned-adm', 'active'], stdout=subprocess.PIPE)
     tuned_adm.wait()
-    grep_rc_tuned = subprocess.call(['grep', 'Current active profile: throughput-performance'], stdin=tuned_adm.stdout, stdout=DEVNULL, stderr=DEVNULL)
+    grep_rc_tuned = subprocess.call(['grep', 'Current active profile: spectrumscale-ece'], stdin=tuned_adm.stdout, stdout=DEVNULL, stderr=DEVNULL)
 
     if grep_rc_tuned == 0: # throughput-performance profile is active
-        print(INFO + LOCAL_HOSTNAME + " current active profile is throughput-performance")
+        print(INFO + LOCAL_HOSTNAME + " current active profile is spectrumscale-ece")
+        # try: #Is it fully matching?
+        return_code = subprocess.call(['tuned-adm','verify'],stdout=DEVNULL, stderr=DEVNULL)
+    
+        if return_code == 0:
+            print(INFO + LOCAL_HOSTNAME + " tuned is matching the active profile")
+        else:
+            print(ERROR + LOCAL_HOSTNAME + " tuned profile is *NOT* fully matching the active profile. " +
+            "Check 'tuned-adm verify' to check the deviations.")
+            errors = errors + 1
+
     else: #Some error
-        print(ERROR + LOCAL_HOSTNAME + "current active profile is not throughput-performance")
+        print(ERROR + LOCAL_HOSTNAME + " current active profile is not spectrumscale-ece. Please check " + GITREPOURL_TUNED)
         errors = errors + 1
-
-    #try: #Is it fully matching?
-    return_code = subprocess.call(['tuned-adm','verify'],stdout=DEVNULL, stderr=DEVNULL)
-    #except:
-    if return_code == 1:
-        print(ERROR + LOCAL_HOSTNAME + " tuned profile is *NOT* fully matching the active profile")
-        errors = errors + 1
-
-    if return_code == 0:
-        print(INFO + LOCAL_HOSTNAME + " tuned is matching the active profile")
 
     return errors
 
@@ -1175,20 +1176,20 @@ def check_SAS_disks(device_type):
         if PYTHON3:
             drives = subprocess.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| egrep \"JBOD|UGood\" | grep SAS | grep " +
+                "| egrep \"JBOD|UGood\" | grep SAS | sort -u |grep " +
                 device_type).split('\n')
             SATA_drives = subprocess.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| grep SATA | grep " +
+                "| grep SATA | sort -u | grep " +
                 device_type).split('\n')
         else:
             drives = commands.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| egrep \"JBOD|UGood\" | grep SAS | grep " +
+                "| egrep \"JBOD|UGood\" | grep SAS | sort -u | grep " +
                 device_type).split('\n')
             SATA_drives = commands.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| grep SATA | grep " +
+                "| grep SATA | sort -u | grep " +
                 device_type).split('\n')
         number_of_drives = len(drives)
         number_of_SATA_drives = len(SATA_drives)
@@ -1497,72 +1498,12 @@ def check_NIC(NIC_dictionary):
     return fatal_error, NIC_model
 
 
-def check_sysctl(sysctl_dictionary):
-    fatal_error = False
-    sysctl_right = []
-    sysctl_wrong = []
-    # Runs checks versus values on sysctl on JSON file
-    errors = 0
-    print(INFO + LOCAL_HOSTNAME + " checking sysctl settings")
-    for sysctl in sysctl_dictionary.keys():
-        if sysctl != "json_version":
-            recommended_value_str = str(sysctl_dictionary[sysctl])
-            # Need to clean the entries that have spaces for integer
-            # comparision
-            recommended_value = int(recommended_value_str.replace(" ", ""))
-            try:
-                if PYTHON3:
-                    current_value_str = subprocess.getoutput(
-                        'sysctl -n ' + sysctl)
-                else:
-                    current_value_str = subprocess.check_output(
-                        ['sysctl', '-n', sysctl], stderr=subprocess.STDOUT)
-
-                current_value_str = current_value_str.replace(
-                    "\t", " ").replace("\n", "")
-                # Need to clean the entries that have spaces for integer
-                # comparision
-                current_value = int(current_value_str.replace(" ", ""))
-                # This creates an possible colision issue, might fix this in
-                # the future
-
-                if recommended_value != current_value:
-                    print(
-                        WARNING +
-                        LOCAL_HOSTNAME +
-                        " " +
-                        sysctl +
-                        " is " +
-                        current_value_str +
-                        " and should be " +
-                        recommended_value_str)
-                    errors = errors + 1
-                    fatal_error = True
-                    sysctl_wrong.append(sysctl)
-                else:
-                    print(
-                        INFO +
-                        LOCAL_HOSTNAME +
-                        " " +
-                        sysctl +
-                        " it is set to the recommended value of " +
-                        recommended_value_str)
-                    sysctl_right.append(sysctl)
-            except BaseException:
-                print(
-                    WARNING +
-                    LOCAL_HOSTNAME +
-                    " " +
-                    sysctl +
-                    " current value does not exists")
-                errors = errors + 1
-                fatal_error = True
-    return fatal_error, errors, sysctl_right, sysctl_wrong
-
-
 def check_distribution():
     # Decide if this is a redhat or a suse
-    what_dist = platform.dist()[0]
+    if PYTHON3:
+        what_dist = distro.distro_release_info()['id']
+    else:
+        what_dist = platform.dist()[0]
     if what_dist in ["redhat", "centos"]:
         return what_dist
     else:  # everything else we fail
@@ -1570,17 +1511,8 @@ def check_distribution():
         return "UNSUPPORTED_DISTRIBUTION"
 
 
-def print_summary_toolkit(sysctl_errors):
+def print_summary_toolkit():
     # We are here so we need to raise an error RC to be catched by the toolkit
-    if sysctl_errors > 0:
-        print(
-            ERROR +
-            LOCAL_HOSTNAME +
-            " " +
-            str(sysctl_errors) +
-            " sysctl setting[s] need to be changed. Check information " +
-            "above this message")
-    # Lets the overall script catch the errors
     print(
         ERROR +
         LOCAL_HOSTNAME +
@@ -1589,7 +1521,6 @@ def print_summary_toolkit(sysctl_errors):
 
 def print_summary_standalone(
         nfatal_errors,
-        sysctl_errors,
         outputfile_name,
         start_time_date,
         end_time_date,
@@ -1608,15 +1539,6 @@ def print_summary_standalone(
         device_speed,
         all_checks_on):
     # This is not being run from the toolkit so lets write a more human summary
-    if sysctl_errors > 0:
-        print(
-            ERROR +
-            LOCAL_HOSTNAME +
-            " " +
-            str(sysctl_errors) +
-            " sysctl setting[s] need to be changed. Check " +
-            "information above this message")
-
     print("")
     print("\tSummary of this standalone run:")
     print("\t\tRun started at " + str(start_time_date))
@@ -1680,19 +1602,17 @@ def main():
         packages_ch,
         storage_check,
         net_check,
-        sysctl_check,
         tuned_check,
         toolkit_run) = parse_arguments()
 
     if (cpu_check and md5_check and mem_check and os_check and packages_ch
-            and storage_check and net_check and sysctl_check):
+            and storage_check and net_check):
         all_checks_on = True
     else:
         all_checks_on = False
 
     # JSON loads and calculate and store MD5
     os_dictionary = load_json(path + "supported_OS.json")
-    sysctl_dictionary = load_json(path + "sysctl.json")
     packages_dictionary = load_json(path + "packages.json")
     SAS_dictionary = load_json(path + "SAS_adapters.json")
     NIC_dictionary = load_json(path + "NIC_adapters.json")
@@ -1706,21 +1626,18 @@ def main():
         nfatal_errors = nfatal_errors + 1
         md5_check = False
         supported_OS_md5 = "FIPS"
-        sysctl_md5 = "FIPS"
         packages_md5 = "FIPS"
         SAS_adapters_md5 = "FIPS"
         NIC_adapters_md5 = "FIPS"
         HW_requirements_md5 = "FIPS"
     else:
         supported_OS_md5 = md5_chksum(path + "supported_OS.json")
-        sysctl_md5 = md5_chksum(path + "sysctl.json")
         packages_md5 = md5_chksum(path + "packages.json")
         SAS_adapters_md5 = md5_chksum(path + "SAS_adapters.json")
         NIC_adapters_md5 = md5_chksum(path + "NIC_adapters.json")
         HW_requirements_md5 = md5_chksum(path + "HW_requirements.json")
 
     outputfile_dict['supported_OS_md5'] = supported_OS_md5
-    outputfile_dict['sysctl_md5'] = sysctl_md5
     outputfile_dict['packages_md5'] = packages_md5
     outputfile_dict['SAS_adapters_md5'] = SAS_adapters_md5
     outputfile_dict['NIC_adapters_md5'] = NIC_adapters_md5
@@ -1734,9 +1651,6 @@ def main():
         supported_OS_md5,
         SUPPORTED_OS_MD5)
     outputfile_dict['passed_md5_supported_os'] = passed_md5_supported_os
-    passed_md5_sysctl = md5_verify(
-        md5_check, "sysctl.json", sysctl_md5, SYSCTL_MD5)
-    outputfile_dict['passed_md5_sysctl'] = passed_md5_sysctl
     passed_md5_packages = md5_verify(
         md5_check,
         "packages.json",
@@ -1765,7 +1679,6 @@ def main():
     # Initial header and checks
     json_version = get_json_versions(
         os_dictionary,
-        sysctl_dictionary,
         packages_dictionary,
         SAS_dictionary,
         NIC_dictionary,
@@ -1790,7 +1703,6 @@ def main():
         packages_ch,
         storage_check,
         net_check,
-        sysctl_check,
         min_socket,
         min_cores,
         min_gb_ram,
@@ -1820,7 +1732,10 @@ def main():
     # Check linux_distribution
     redhat_distribution_str = "NOT CHECKED"
     # Need this part out of OS check in case it is disabled by user
-    redhat_distribution = platform.linux_distribution()
+    if PYTHON3:
+        redhat_distribution = distro.linux_distribution()
+    else:
+        redhat_distribution = platform.linux_distribution()
     version_string = redhat_distribution[1]
     redhat8 = version_string.startswith("8.")
     # End of RHEL8 out of OS check
@@ -1994,7 +1909,7 @@ def main():
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
-                " has no supported SAS adapter nor NVMe supported " +
+                " has no supported SAS nor NVMe supported " +
                 "devices in this system")
             nfatal_errors = nfatal_errors + 1
         elif SSD_error and NVME_error:
@@ -2083,21 +1998,11 @@ def main():
         else:
             outputfile_dict['tuned_fail'] = False
 
-    # Check sysctl
-    if sysctl_check:
-        fatal_error, sysctl_errors, sysctl_right, sysctl_wrong = check_sysctl(
-            sysctl_dictionary)
-        outputfile_dict['sysctl_right'] = sysctl_right
-        outputfile_dict['sysctl_wrong'] = sysctl_wrong
-        if fatal_error:
-            nfatal_errors = nfatal_errors + 1
-    else:
-        sysctl_errors = 0
-
-    if nfatal_errors > 0:
-        outputfile_dict['ECE_node_ready'] = False
-    else:
+    # Set general status of acceptance of this node
+    if nfatal_errors == 0 and all_checks_on:
         outputfile_dict['ECE_node_ready'] = True
+    else:
+        outputfile_dict['ECE_node_ready'] = False
 
     # Save lspci output to JSON
     lspci_dict = dict()
@@ -2118,7 +2023,7 @@ def main():
 
     outputfile_dict['lspci'] = lspci_dict
 
-    # Exit protocol
+    # Exit protocol    
     DEVNULL.close()
 
     outputfile_name = path + ip_address + ".json"
@@ -2130,11 +2035,10 @@ def main():
         outputfile.write(outputdata)
 
     if toolkit_run and nfatal_errors > 0:
-        print_summary_toolkit(sysctl_errors)
+        print_summary_toolkit()
     if toolkit_run is False:
         print_summary_standalone(
             nfatal_errors,
-            sysctl_errors,
             outputfile_name,
             start_time_date,
             end_time_date,

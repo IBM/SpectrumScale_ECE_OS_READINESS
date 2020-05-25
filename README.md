@@ -16,9 +16,10 @@ This tool is does not overrule the official documentation of the product. The re
 
 **PREREQUISITES:** Before running this tool you **must** install the software prerequisites. Those are:
  * RPM packages that are listed on on packages.json file with a value of 0.
- * python-dmidecode and python-ethtool RPM packages.
+ * For Python2 -> python-dmidecode and python-ethtool RPM packages.
+ * For Python3 -> python3-dmidecode and python3-ethtool python3-distro RPM packages
  * nvme-cli RPM package if NVME drive[s] exists in the system
- * storcli if SAS card[s] exists in the system
+ * storcli if SAS card[s] exists in the system, ad storcli must be able ot manage those SAS cards
  * megacli is not supported by ECE nor this tool as stated on the above linked "Minimum hardware requirements and precheck"
 
 The tool requires one parameter (--ip) to be passed, it has to be the local IP where RAID traffic is going to happen. It does not allow names of a node it must be an IPv4 address
