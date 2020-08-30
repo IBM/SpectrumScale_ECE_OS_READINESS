@@ -1,8 +1,11 @@
 {
-  "json_version": "1.3",
-  "SAS-3 3108": "OK",
-  "SAS3516": "OK",
-  "SAS3008": "OK",
-  "SAS3508": "OK",
-  "SAS3408": "OK"
-  }
+  "json_version": "1.4",
+  "MegaRAID SAS-3 3108": "OK",
+  "MegaRAID SAS3516": "OK",
+  "MegaRAID SAS3008": "OK",
+  "MegaRAID SAS3508": "OK",
+  "MegaRAID SAS3408": "OK",
+  "LSI SAS3416 Fusion-MPT Tri-Mode": "OK",
+  "LSI SAS3408 Fusion-MPT Tri-Mode": "OK",
+  "LSI SAS3008 PCI-Express Fusion-MPT": "OK"
+  } 

@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.35"
+MOR_VERSION = "1.37"
 
 # GIT URLs
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -103,8 +103,8 @@ DEVNULL = open(os.devnull, 'w')
 HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "3bc8b63548de2e16fd9ce67adc073da1"
-SAS_ADAPTERS_MD5 = "a35cc1ed719d9ca6606bed345ed58824"
-SUPPORTED_OS_MD5 = "8b2aedac474af763aa94bf38c4b781f5"
+SAS_ADAPTERS_MD5 = "54a981757893153dc5122c1e331dce20"
+SUPPORTED_OS_MD5 = "7e7c5ce0d9f9314cbaffc997d6d906a5"
 
 # Functions
 def parse_arguments():
@@ -947,7 +947,7 @@ def check_SAS(SAS_dictionary):
         if SAS != "json_version":
             try:
                 lspci_out = subprocess.Popen(['lspci'], stdout=subprocess.PIPE)
-                grep_proc = subprocess.Popen(['grep', 'MegaRAID'], stdin=lspci_out.stdout, stdout=subprocess.PIPE)
+                grep_proc = subprocess.Popen(['grep', 'SAS'], stdin=lspci_out.stdout, stdout=subprocess.PIPE)
                 grep_out_lspci, err = grep_proc.communicate()
                 if err != '':
                     # We hit something unexpected
@@ -963,7 +963,7 @@ def check_SAS(SAS_dictionary):
                 if grep_rc_lspci == 0:  # We have this SAS, 1 or more
                     if SAS_dictionary[SAS] == "OK":                       
                         if SAS_var_is_OK:
-                            SAS_model.append(SAS)
+                            SAS_model.append(this_SAS)
                             storcli_err = check_storcli()
                             sas_speed_err = check_SAS_speed()
                             if (storcli_err and sas_speed_err) == False:
@@ -1150,12 +1150,12 @@ def check_SAS_speed():
     try:
         if PYTHON3:
             sas_speed = subprocess.getoutput(
-                "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| grep \"Device Interface\" | awk '{print $4}'")
+                "/opt/MegaRAID/storcli/storcli64 /call show all" +
+                "| grep \"Device Interface\" | sort -u | awk '{print $4}'")
         else:
             sas_speed = commands.getoutput(
-                "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| grep \"Device Interface\" | awk '{print $4}'")
+                "/opt/MegaRAID/storcli/storcli64 /call show all" +
+                "| grep \"Device Interface\" | sort -u | awk '{print $4}'")
         
         if sas_speed in allowed_dev_int:
             fatal_error = False
@@ -1332,6 +1332,15 @@ def check_WCE_SAS(SAS_drives_dict):
                 " cannot parse WWN for SAS devices")
         SAS_drives_dict[drive].append(wwn.lower())
         map_error, os_device = map_WWN_to_OS_device(wwn.lower())
+        if map_error:  # We need to exit
+            sys.exit(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " cannot map drive from WWN " +
+                wwn +
+                " to its OS name. Please run 'rescan-scsi-bus.sh' " +
+                "in this node and try again"
+            ) 
         SAS_drives_dict[drive].append(map_error)
         SAS_drives_dict[drive].append(os_device)
         wce_drive_enabled = False
