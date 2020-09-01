@@ -28,7 +28,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.37"
+MOR_VERSION = "1.39"
 
 # GIT URLs
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -588,10 +588,10 @@ def check_memory(min_gb_ram):
             str(num_dimms) +
             " DIMM slot[s] are populated. This system has " +
             str(empty_dimms) +
-            " empty DIMM slot[s]. This is not recommended to run ECE")
+            " empty DIMM slot[s]. This is not optimal if NVMe devices are used")
     else:
         print(INFO + LOCAL_HOSTNAME + " all " + str(num_dimms) +
-              " DIMM slot[s] are populated. This is recommended to run ECE")
+              " DIMM slot[s] are populated. This is recommended when NVMe devices are used")
     dimm_memory_size = []
     for dimm in dimm_size.keys():
         dimm_memory_size.append(dimm_size[dimm])
@@ -979,6 +979,7 @@ def check_SAS(SAS_dictionary):
                                 )
                             if storcli_err:
                                 found_SAS = False
+                                fatal_error = True
                                 print(
                                     ERROR +
                                     LOCAL_HOSTNAME +
@@ -987,7 +988,8 @@ def check_SAS(SAS_dictionary):
                                     " adapter that storcli cannot manage."
                                 )
                             if sas_speed_err:
-                                found_SAS = False
+                                found_SAS = True
+                                fatal_error = True
                                 print(
                                     ERROR +
                                     LOCAL_HOSTNAME +
@@ -1040,7 +1042,7 @@ def check_SAS(SAS_dictionary):
                                 " adapter that storcli cannot manage."
                             )
                         if sas_speed_err:
-                            found_SAS = False
+                            found_SAS = True
                             fatal_error = True
                             print(
                                 ERROR +
@@ -1918,10 +1920,10 @@ def main():
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
-                " has no supported SAS nor NVMe supported " +
+                " has found issues with SAS adapter and NVMe  " +
                 "devices in this system")
             nfatal_errors = nfatal_errors + 1
-        elif SSD_error and NVME_error:
+        if SSD_error and NVME_error:
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
