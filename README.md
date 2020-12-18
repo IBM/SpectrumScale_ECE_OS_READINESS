@@ -6,7 +6,6 @@ This tool is run when installing ECE with the Spectrum Scale toolkit, it is used
 This tool is does not overrule the official documentation of the product. The requiriments stated on the official documenation are the authoritative ones as [Minimum hardware requirements and precheck](https://www.ibm.com/support/knowledgecenter/STXKQY_ECE_5.0.4/com.ibm.spectrum.scale.ece.v5r04.doc/b1lece_min_hwrequirements.html)
 
 **Known limitations**
-- Current code only works correctly if the system has one or none SAS cards. It does not properly work with more than one SAS card yet. Results cannot be trusted when more than one SAS card is on the system. This is plan to be addressed on future builds
 - On RHEL 8 series there is a warning message at the end of the run, this is due the current version of dmidecode and python modules that are shipped with RHEL from OS upstream. When the version catch up on the OS upstream repositories that message would go away. The below warning can be ignored for now.
 ```
 # SMBIOS implementations newer than version 2.7 are not
