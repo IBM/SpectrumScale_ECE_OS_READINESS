@@ -6,6 +6,7 @@ This tool is run when installing ECE with the Spectrum Scale toolkit, it is used
 This tool is does not overrule the official documentation of the product. The requiriments stated on the official documenation are the authoritative ones as [Minimum hardware requirements and precheck](https://www.ibm.com/support/knowledgecenter/STXKQY_ECE_5.0.4/com.ibm.spectrum.scale.ece.v5r04.doc/b1lece_min_hwrequirements.html)
 
 **Known limitations**
+- Current code only works correctly if the system has one or none SAS cards. It does not properly work with more than one SAS card yet. Results cannot be trusted when more than one SAS card is on the system. This is plan to be addressed on future builds
 - On RHEL 8 series there is a warning message at the end of the run, this is due the current version of dmidecode and python modules that are shipped with RHEL from OS upstream. When the version catch up on the OS upstream repositories that message would go away. The below warning can be ignored for now.
 ```
 # SMBIOS implementations newer than version 2.7 are not
@@ -16,7 +17,7 @@ This tool is does not overrule the official documentation of the product. The re
 **PREREQUISITES:** Before running this tool you **must** install the software prerequisites. Those are:
  * RPM packages that are listed on on packages.json file with a value of 0.
  * For Python2 -> python-dmidecode and python-ethtool RPM packages.
- * For Python3 -> python3-dmidecode and python3-ethtool python3-distro RPM packages
+ * For Python3 -> python3-dmidecode and python3-ethtool python3-distro RPM packages and python pyyaml module, please check [pyyaml documentation](https://pyyaml.org/wiki/PyYAMLDocumentation) 
  * nvme-cli RPM package if NVME drive[s] exists in the system
  * storcli if SAS card[s] exists in the system, ad storcli must be able ot manage those SAS cards
  * megacli is not supported by ECE nor this tool as stated on the above linked "Minimum hardware requirements and precheck"

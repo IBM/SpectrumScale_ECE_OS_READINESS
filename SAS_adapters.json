@@ -1,7 +1,8 @@
 {
-  "json_version": "1.4",
+  "json_version": "1.5",
   "MegaRAID SAS-3 3108": "OK",
   "MegaRAID SAS3516": "OK",
+  "MegaRAID Tri-Mode SAS3516": "OK",
   "MegaRAID SAS3008": "OK",
   "MegaRAID SAS3508": "OK",
   "MegaRAID SAS3408": "OK",

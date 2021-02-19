@@ -11,6 +11,7 @@ import importlib
 import hashlib
 import re
 import shlex
+import logging
 
 try:
     raw_input      # Python 2
@@ -24,15 +25,17 @@ if PYTHON3:
 else:
     import commands
 
+
 # Start the clock
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.39"
+MOR_VERSION = "1.55"
 
 # GIT URLs
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
 GITREPOURL_TUNED = "https://github.com/IBM/SpectrumScale_ECE_tuned_profile"
+GITREPOURL_STORAGE_TOOL = "https://github.com/IBM/SpectrumScale_ECE_STORAGE_READINESS"
 
 # Colorful constants
 RED = '\033[91m'
@@ -96,17 +99,46 @@ except ImportError:
             LOCAL_HOSTNAME +
             " cannot import ethtool, please check python-ethtool is installed")
 
+
 # devnull redirect destination
 DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
-HW_REQUIREMENTS_MD5 = "099787d857918df7bea298fcace5e30c"
+HW_REQUIREMENTS_MD5 = "81d67fe72ca19693ea6f27bc6416ead1"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
 PACKAGES_MD5 = "3bc8b63548de2e16fd9ce67adc073da1"
-SAS_ADAPTERS_MD5 = "54a981757893153dc5122c1e331dce20"
-SUPPORTED_OS_MD5 = "7e7c5ce0d9f9314cbaffc997d6d906a5"
+SAS_ADAPTERS_MD5 = "4c28f6f00ccd6639bfa00318e2b51256"
+SUPPORTED_OS_MD5 = "51c7a390da6d7e1b255c5c54c980b0bf"
 
 # Functions
+def set_logger_up(output_dir, log_file, verbose):
+    if os.path.isdir(output_dir) == False:
+        try:
+            os.makedirs(output_dir)
+        except BaseException:
+            sys.exit(
+                ERROR + 
+                LOCAL_HOSTNAME +
+                " Cannot create " + 
+                output_dir
+            )
+    log_format = '%(asctime)s %(levelname)-4s:\t %(message)s'
+    logging.basicConfig(level=logging.DEBUG,
+            format=log_format,
+            filename=log_file,
+            filemode='w')
+ 
+    console = logging.StreamHandler()
+    if verbose:
+        console.setLevel(logging.DEBUG)
+    else:
+        console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter(log_format))
+    logging.getLogger('').addHandler(console)
+    log = logging.getLogger("MOR")
+    return log
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
@@ -194,6 +226,13 @@ def parse_arguments():
         default=True)
 
     parser.add_argument(
+        '--allow_sata',
+        action='store_true',
+        dest='sata_on',
+        help='EXPERIMENTAL: To do checks on SATA drives. Do NOT use for real checks',
+        default=False)
+
+    parser.add_argument(
         '--toolkit',
         action='store_true',
         dest='toolkit_run',
@@ -201,11 +240,19 @@ def parse_arguments():
         default=False)
 
     parser.add_argument(
-        '-v',
+        '-V',
         '--version',
         action='version',
         version='IBM Spectrum Scale Erasure Code Edition OS readiness ' +
         'version: ' + MOR_VERSION)
+
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        action='store_true',
+        dest='is_verbose',
+        help='Shows debug messages on console',
+        default=False)
 
     args = parser.parse_args()
 
@@ -220,7 +267,9 @@ def parse_arguments():
             args.storage_check,
             args.net_check,
             args.tuned_check,
-            args.toolkit_run)
+            args.sata_on,
+            args.toolkit_run,
+            args.is_verbose)
 
 
 def load_json(json_file_str):
@@ -318,7 +367,6 @@ def show_header(moh_version, json_version, toolkit_run):
 
 def rpm_is_installed(rpm_package):
     # returns the RC of rpm -q rpm_package or quits if it cannot run rpm
-    errors = 0
     try:
         return_code = subprocess.call(
             ['rpm', '-q', rpm_package], stdout=DEVNULL, stderr=DEVNULL)
@@ -456,6 +504,29 @@ def packages_check(packages_dictionary):
     return(errors)
 
 
+def get_system_serial():
+    # For now we do OS call, not standarized output on python dmidecode
+    fatal_error = False
+    system_serial = "00000000"
+    try:
+        if PYTHON3:
+            system_serial = subprocess.getoutput(
+                "dmidecode -s system-serial-number"
+            )
+        else:
+            system_serial = commands.getoutput(
+                "dmidecode -s system-serial-number"
+            )
+    except BaseException:
+        fatal_error = True
+        print(
+            WARNING +
+            LOCAL_HOSTNAME +
+            " cannot query system serial"
+            )
+    return fatal_error, system_serial
+        
+
 def check_processor():
     fatal_error = False
     print(INFO + LOCAL_HOSTNAME + " checking processor compatibility")
@@ -479,21 +550,40 @@ def check_processor():
     return fatal_error, current_processor
 
 
-def check_sockets_cores(min_socket, min_cores):
+def check_sockets_cores(min_socket, amd_socket, min_cores):
     fatal_error = False
     cores = []
     print(INFO + LOCAL_HOSTNAME + " checking socket count")
     sockets = dmidecode.processor()
+    for socket in sockets.keys():
+        socket_version = sockets[socket]['data']['Version'].decode()
+    if "AMD" in socket_version:
+        is_AMD = True
+    else:
+        is_AMD = False
     num_sockets = len(sockets)
-    if num_sockets < min_socket:
+    if is_AMD:
+        min_socket = amd_socket
+        print(
+            INFO +
+            LOCAL_HOSTNAME +
+            " this system is AMD based"
+        )
+    else:
+        print(
+            INFO +
+            LOCAL_HOSTNAME +
+            " this system is Intel based"
+        )
+    if num_sockets != min_socket:
         print(
             ERROR +
             LOCAL_HOSTNAME +
             " this system has " +
             str(num_sockets) +
-            " socket[s] which is less than " +
+            " socket[s] which is not " +
             str(min_socket) +
-            " sockets required to support ECE")
+            " socket[s] required to support ECE")
         fatal_error = True
     else:
         print(
@@ -501,15 +591,17 @@ def check_sockets_cores(min_socket, min_cores):
             LOCAL_HOSTNAME +
             " this system has " +
             str(num_sockets) +
-            " sockets which complies with the minimum of " +
+            " socket[s] which complies with the number of " +
             str(min_socket) +
-            " sockets required to support ECE")
+            " socket[s] required to support ECE")
 
     print(INFO + LOCAL_HOSTNAME + " checking core count")
     for socket in sockets.keys():
         core_count = sockets[socket]['data']['Core Count']
         # For socket but no chip installed
         if core_count == "None":
+            core_count = 0
+        if core_count is None:
             core_count = 0
         cores.append(core_count)
         if core_count < min_cores:
@@ -532,7 +624,7 @@ def check_sockets_cores(min_socket, min_cores):
                 str(socket) +
                 " has " +
                 str(core_count) +
-                " core[s] which copmplies with " +
+                " core[s] which complies with " +
                 str(min_cores) +
                 " cores per socket required to support ECE")
     return fatal_error, num_sockets, cores
@@ -974,7 +1066,7 @@ def check_SAS(SAS_dictionary):
                                     LOCAL_HOSTNAME +
                                     " has " +
                                     SAS +
-                                    " adapter which is tested by ECE. The disks " +
+                                    " adapter which is tested by IBM. The disks " +
                                     "under this SAS adapter could be used by ECE"
                                 )
                             if storcli_err:
@@ -989,13 +1081,15 @@ def check_SAS(SAS_dictionary):
                                 )
                             if sas_speed_err:
                                 found_SAS = True
-                                fatal_error = True
+                                fatal_error = False
                                 print(
-                                    ERROR +
+                                    WARNING +
                                     LOCAL_HOSTNAME +
                                     " has " +
                                     SAS +
-                                    " adapter that has lower speed than needed"
+                                    " has fabric speed failed check. " +
+                                    "Please run storage tool from " +
+                                    GITREPOURL_STORAGE_TOOL
                                 )
                     elif SAS_dictionary[SAS] == "NOK":
                         print(
@@ -1019,7 +1113,7 @@ def check_SAS(SAS_dictionary):
                         SAS_model.append("NOT TESTED")
                         storcli_err = check_storcli()
                         sas_speed_err = check_SAS_speed()
-                        if (sas_speed_err and sas_speed_err) == False:
+                        if (storcli_err and sas_speed_err) == False:
                             found_SAS = True
                             fatal_error = False
                             check_disks = True
@@ -1043,13 +1137,15 @@ def check_SAS(SAS_dictionary):
                             )
                         if sas_speed_err:
                             found_SAS = True
-                            fatal_error = True
+                            fatal_error = False
                             print(
-                                ERROR +
+                                WARNING +
                                 LOCAL_HOSTNAME +
                                 " has " +
                                 SAS +
-                                " adapter that has lower speed than required"
+                                " has fabric speed failed check. " +
+                                "Please run storage tool from " +
+                                GITREPOURL_STORAGE_TOOL
                             )
             except BaseException:
                 sys.exit(
@@ -1092,11 +1188,14 @@ def check_SAS(SAS_dictionary):
                         " has an adapter that storcli cannot manage.")
                 if sas_dev_int:
                     found_SAS = False
-                    fatal_error = True
+                    fatal_error = False
                     print(
-                        ERROR +
+                        WARNING +
                         LOCAL_HOSTNAME +
-                        " has adapter that has lower speed than needed")    
+                        " SAS adapater fabric speed failed check. " +
+                        "Please run storage tool from " +
+                        GITREPOURL_STORAGE_TOOL
+                    ) 
             else:
                 print(
                     ERROR +
@@ -1148,7 +1247,7 @@ def check_storcli():
 
 
 def check_SAS_speed():
-    allowed_dev_int = ['SAS-12G']
+    allowed_dev_int = ['12G']
     try:
         if PYTHON3:
             sas_speed = subprocess.getoutput(
@@ -1159,16 +1258,186 @@ def check_SAS_speed():
                 "/opt/MegaRAID/storcli/storcli64 /call show all" +
                 "| grep \"Device Interface\" | sort -u | awk '{print $4}'")
         
-        if sas_speed in allowed_dev_int:
+        if  allowed_dev_int in sas_speed:
             fatal_error = False
+            print(
+                INFO +
+                LOCAL_HOSTNAME +
+                " has a fabric SAS speed of " +
+                sas_speed +
+                " for its fabric. Please rememeber to run the Storage " +
+                "acceptance tool that can be found at " + 
+                GITREPOURL_STORAGE_TOOL
+            )
         else:
-            fatal_error = True
+            # We just print a warning for now
+            fatal_error = False
+            print(
+                WARNING +
+                LOCAL_HOSTNAME +
+                " has a fabric SAS speed that is not 12G. It reports " +
+                sas_speed +
+                " for its fabric. Please rememeber to run the Storage " +
+                "acceptance tool that can be found at " + 
+                GITREPOURL_STORAGE_TOOL
+            )
     except BaseException:
         fatal_error = True
     return fatal_error
 
+def dpofua_check(sata_drive):
+    # We are going to check DpoFua = 1
+    try:
+        if PYTHON3:
+            sg_modes_output = subprocess.getoutput(
+                '/bin/sg_modes ' +
+                sata_drive + 
+                ' | grep DpoFua')
+        else:
+            sg_modes_output = commands.getoutput(
+                '/bin/sg_modes ' +
+                sata_drive + 
+                ' | grep DpoFua')
+        # We got a line like
+        #   Mode data length=44, medium type=0x00, WP=0, DpoFua=0, longlba=0
+        # Lets clean the spaces first
+        sg_modes_output = sg_modes_output.replace(" ", "")
+        # Lets split by ,
+        dpofua = sg_modes_output.split(",")[3]
+        if "DpoFua" not in dpofua:
+            # We did not wrap it correctly
+            print(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " cannot check DpoFua value on SATA drive " +
+                str(sata_drive)
+            )
+            dpofua_check_passed = False
+        else:
+            dpofua_value = dpofua[-1]
+            if dpofua_value == "1":
+                print(
+                    INFO +
+                    LOCAL_HOSTNAME +
+                    " DpoFua value on SATA drive " +
+                    str(sata_drive) +
+                    " is 1"
+                )
+                dpofua_check_passed = True
+            else:
+                print(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " DpoFua value on SATA drive " +
+                    str(sata_drive) +
+                    " is not 1"
+                )
+                dpofua_check_passed = False
+    except BaseException:
+        print(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot check DpoFua value on SATA drive " +
+            str(sata_drive)
+        )
+        dpofua_check_passed = False
+    return dpofua_check_passed   
 
-def check_SAS_disks(device_type):
+
+def sct_erc_check(sata_drive):
+    # We are going to check SCT Error Recovery Control Read/Write time <= 10
+    try:
+        if PYTHON3:
+            smartctl_output = subprocess.getoutput(
+                '/sbin/smartctl -l scterc ' +
+                sata_drive + 
+                ' | grep seconds')
+        else:
+            smartctl_output = commands.getoutput(
+                '/sbin/smartctl -l scterc ' +
+                sata_drive + 
+                ' | grep seconds')
+        # We got two lines like (or none if no support on drive for SCT)
+        #  Read: 70 (7.0 seconds)
+        #  Write: 70 (7.0 seconds)
+        if "seconds" in smartctl_output:
+            # We got some output
+            output_by_line = smartctl_output.split("\n")
+            if len(output_by_line) == 2:
+                # We move on, clean multiple spaces, just in case
+                output_read = re.sub('\s{2,}',' ',output_by_line[0])
+                output_write = re.sub('\s{2,}',' ',output_by_line[1])
+                # If exception we fall back to except already defined
+                sct_erc_read = int(output_read.split(" ")[2])
+                sct_erc_write = int(output_write.split(" ")[2])
+                if (sct_erc_read and sct_erc_write) <= 100:
+                    # We have both more than 10 seconds
+                    print(
+                        INFO +
+                        LOCAL_HOSTNAME +
+                        " SCT ERC read/write values on SATA drive " +
+                        str(sata_drive) + 
+                        " are set 10 seconds or less"
+                    )
+                    sct_erc_check_passed = True
+                    return sct_erc_check_passed
+                else:
+                    print(
+                        ERROR +
+                        LOCAL_HOSTNAME +
+                        " SCT ERC read/write value on SATA drive " +
+                        str(sata_drive) + 
+                        " is set to more than 10 seconds"
+                    )
+                    sct_erc_check_passed = False
+                    return sct_erc_check_passed
+            else:
+                # Something is not right, we fail
+                print(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " cannot check SCT ERC read/write value on SATA drive " +
+                    str(sata_drive)
+                )
+                sct_erc_check_passed = False
+        else:
+            print(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " does not support SCT ERC on SATA drive " +
+            str(sata_drive)
+        )
+        sct_erc_check_passed = False
+    except BaseException:
+        print(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " cannot check SCT ERC value on SATA drive " +
+            str(sata_drive)
+        )
+        sct_erc_check_passed = False
+    return sct_erc_check_passed   
+
+
+def sata_checks(SATA_drives):
+    # We do perform some SATA checks
+    errors = 0
+    for sata_drive in SATA_drives:
+        dpofua_pass = dpofua_check(sata_drive)
+        if dpofua_pass == False:
+            errors = errors + 1
+        sct_erc_pass = sct_erc_check(sata_drive)
+        if sct_erc_pass == False:
+            errors = errors + 1
+        
+    if errors == 0:
+        all_sata_drives_pass = True
+    else:
+        all_sata_drives_pass = False
+    return all_sata_drives_pass
+
+
+def check_SAS_disks(device_type, sata_on):
     fatal_error = False
     num_errors = 0
     number_of_drives = 0
@@ -1182,7 +1451,7 @@ def check_SAS_disks(device_type):
                 device_type).split('\n')
             SATA_drives = subprocess.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| grep SATA | sort -u | grep " +
+                "| grep SATA | egrep \"JBOD|UGood\" | sort -u | grep " +
                 device_type).split('\n')
         else:
             drives = commands.getoutput(
@@ -1191,22 +1460,81 @@ def check_SAS_disks(device_type):
                 device_type).split('\n')
             SATA_drives = commands.getoutput(
                 "/opt/MegaRAID/storcli/storcli64 /call show " +
-                "| grep SATA | sort -u | grep " +
+                "| grep SATA | egrep \"JBOD|UGood\" | sort -u | grep " +
                 device_type).split('\n')
         number_of_drives = len(drives)
         number_of_SATA_drives = len(SATA_drives)
 
         if number_of_SATA_drives > 1:
-            # Throw a warning about SATA drives
-            print(
-                WARNING +
-                LOCAL_HOSTNAME +
-                " has " +
-                str(number_of_SATA_drives) +
-                " SATA " +
-                device_type +
-                " drive[s] on the SAS adapter. SATA drives are not" +
-                " supported by ECE. Do not use them for ECE")
+            if sata_on:
+                sata_checks_passed = False
+                # We are going to do some SATA checks
+                if PYTHON3:
+                    SATA_OS_drives = subprocess.getoutput(
+                        "/usr/bin/lsscsi | grep ATA | awk '{print$6}'"
+                    ).split("\n")
+                else:
+                    SATA_OS_drives = commands.getoutput(
+                        "/usr/bin/lsscsi | grep ATA | awk '{print$6}'"
+                    ).split("\n")
+                if len(SATA_OS_drives) == number_of_SATA_drives:
+                    # All SATA are JBOD and no OS
+                    sata_checks_passed = sata_checks(SATA_OS_drives)
+                else:
+                    # We need to get out OS drive
+                    if PYTHON3:
+                        partition_drives = subprocess.getoutput(
+                            "cat /proc/mounts | grep '/dev\/sd' | awk '{print $1}'"
+                        ).split("\n")
+                    else:
+                        partition_drives = commands.getoutput(
+                            "cat /proc/mounts | grep '/dev\/sd' | awk '{print $1}'"
+                        ).split("\n")
+                    clean_partition_drives = []
+                    for part in partition_drives:
+                        clean_partition_drives.append(part[:-1])
+                    uniq_partition_drives = set(clean_partition_drives)
+                    SATA_OS_drives_to_check = list(set(SATA_OS_drives).difference(uniq_partition_drives))
+                    # We have a JBOD on OS issue here
+                    sata_checks_passed = sata_checks(SATA_OS_drives_to_check)
+                if sata_checks_passed:
+                    print(
+                        WARNING +
+                        LOCAL_HOSTNAME +
+                        " has " +
+                        str(number_of_SATA_drives) +
+                        " SATA " +
+                        device_type +
+                        " drive[s] on the SAS adapter. While those pass the " +
+                        "performed checks SATA drives are not supported by " +
+                        "ECE. Do not use them for ECE"
+                    )
+                else:
+                    num_errors = num_errors + 1
+                    print(
+                        ERROR +
+                        LOCAL_HOSTNAME +
+                        " has " +
+                        str(number_of_SATA_drives) +
+                        " SATA " +
+                        device_type +
+                        " drive[s] on the SAS adapter. Those do not pass the " +
+                        "performed checks SATA drives are not supported by " +
+                        "ECE. Do not use them for ECE"
+                    )
+
+            else:
+                # Throw a warning about SATA drives
+                print(
+                    WARNING +
+                    LOCAL_HOSTNAME +
+                    " has " +
+                    str(number_of_SATA_drives) +
+                    " SATA " +
+                    device_type +
+                    " drive[s] on the SAS adapter. SATA drives are not" +
+                    " supported by ECE. Do not use them for ECE"
+                )
 
         if number_of_drives > 0:
             drives_size_list = []
@@ -1522,6 +1850,47 @@ def check_distribution():
         return "UNSUPPORTED_DISTRIBUTION"
 
 
+def check_py3_yaml():
+    # YAML is not needed for this tool but Scale 5.1.0+
+    if PYTHON3:
+        try:
+            import yaml
+            print(
+                INFO +
+                LOCAL_HOSTNAME +
+                " python 3 YAML module found"
+            )
+            return False
+        except ImportError:
+            print(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " python 3 YAML module not found, please install it " +
+                "and run this tool again"
+            )
+            return True
+    else:
+        try:
+            py3_yaml = commands.getoutput( 'pydoc3 -k yaml ' + ' | grep "yaml"').split()
+        except BaseException:
+            py3_yaml = False
+        if py3_yaml:
+            print(
+                INFO +
+                LOCAL_HOSTNAME +
+                " python 3 YAML module found"
+            )
+            return False
+        else:
+            print(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " python 3 YAML module not found, please install it " +
+                "and run this tool again"
+            )
+            return True
+
+
 def print_summary_toolkit():
     # We are here so we need to raise an error RC to be catched by the toolkit
     print(
@@ -1548,7 +1917,8 @@ def print_summary_standalone(
         number_of_NVME_drives,
         NIC_model,
         device_speed,
-        all_checks_on):
+        all_checks_on,
+        sata_on):
     # This is not being run from the toolkit so lets write a more human summary
     print("")
     print("\tSummary of this standalone run:")
@@ -1573,6 +1943,16 @@ def print_summary_standalone(
     print("\t\t" + outputfile_name + " contains information about this run")
     print("")
 
+    if sata_on:
+        print(
+            WARNING +
+            LOCAL_HOSTNAME +
+            " SATA tests were performed, even if this system gave a " +
+            "passed status SATA drives cannot be used on ECE. Besides of " +
+            "a non supported setup by IBM. " +
+            "Be aware you might have data loss if you ignore this warning"
+        )
+
     if nfatal_errors > 0:
         sys.exit(
             ERROR +
@@ -1583,6 +1963,14 @@ def print_summary_standalone(
             INFO +
             LOCAL_HOSTNAME +
             " system can run IBM Spectrum Scale Erasure Code Edition")
+        if sata_on:
+            print(
+                WARNING +
+                LOCAL_HOSTNAME +
+                " SATA tests were performed, even this system gave a " +
+                "passed status SATA drives cannot be used on ECE. Besides of " +
+                "a non supported setup by IBM you might face data loss"
+            )
     else:
         print(
             WARNING +
@@ -1604,32 +1992,71 @@ def main():
 
     # Parse ArgumentParser
     (fips_mode,
-        ip_address,
-        path,
-        cpu_check,
-        md5_check,
-        mem_check,
-        os_check,
-        packages_ch,
-        storage_check,
-        net_check,
-        tuned_check,
-        toolkit_run) = parse_arguments()
-
+    ip_address,
+    path,
+    cpu_check,
+    md5_check,
+    mem_check,
+    os_check,
+    packages_ch,
+    storage_check,
+    net_check,
+    tuned_check,
+    sata_on,
+    toolkit_run,
+    want_verbose) = parse_arguments()
+    
+    date_for_log = str(start_time_date).replace(" ", "_")
+    set_logger_up(
+        path, 
+        "mor_debug_" + date_for_log,
+        want_verbose)
+    logging.debug(
+        "Going to check if all tests are enabled"
+    )
     if (cpu_check and md5_check and mem_check and os_check and packages_ch
             and storage_check and net_check):
         all_checks_on = True
+        logging.debug(
+            "All tests are enabled"
+        )
     else:
         all_checks_on = False
+        logging.debug(
+            "Not all tests are enabled"
+        )
+
+    if sata_on:
+        logging.debug(
+           "SATA checks are enabled"
+        )
+        print(
+            WARNING +
+            LOCAL_HOSTNAME +
+            " SATA checks are enabled. This is not to be used on any " +
+            "environent even if the checks are passed"
+        )
+    else:
+        logging.debug(
+            "SATA checks are not enabled"
+        )
 
     # JSON loads and calculate and store MD5
+    logging.debug(
+        "Going to load the JSON files"
+    )
     os_dictionary = load_json(path + "supported_OS.json")
     packages_dictionary = load_json(path + "packages.json")
     SAS_dictionary = load_json(path + "SAS_adapters.json")
     NIC_dictionary = load_json(path + "NIC_adapters.json")
     HW_dictionary = load_json(path + "HW_requirements.json")
-    
+    logging.debug(
+        "JSON files loaded"
+    )
     if fips_mode:
+        logging.debug(
+            "FIPS mode enabled"
+        )
         print(
             ERROR +
             LOCAL_HOSTNAME +
@@ -1642,67 +2069,145 @@ def main():
         NIC_adapters_md5 = "FIPS"
         HW_requirements_md5 = "FIPS"
     else:
+        logging.debug(
+            "FIPS mode not enabled. Going to calculate MD5 SUMs"
+        )
         supported_OS_md5 = md5_chksum(path + "supported_OS.json")
         packages_md5 = md5_chksum(path + "packages.json")
         SAS_adapters_md5 = md5_chksum(path + "SAS_adapters.json")
         NIC_adapters_md5 = md5_chksum(path + "NIC_adapters.json")
         HW_requirements_md5 = md5_chksum(path + "HW_requirements.json")
-
+        logging.debug(
+            "All MD5 SUMs of JSON files calculated"
+        )
+    logging.debug(
+        "Going to write in dictionary calculated MD5 SUMs"    
+    )
     outputfile_dict['supported_OS_md5'] = supported_OS_md5
     outputfile_dict['packages_md5'] = packages_md5
     outputfile_dict['SAS_adapters_md5'] = SAS_adapters_md5
     outputfile_dict['NIC_adapters_md5'] = NIC_adapters_md5
     outputfile_dict['HW_requirements_md5'] = HW_requirements_md5
+    logging.debug(
+        "Calculated MD5 SUMs written into dictionary"
+    )
 
 
     # Check MD5 hashes. Files are already checked that exists and load JSON
+    logging.debug(
+        "Going to verify supported_OS.json"
+    )
     passed_md5_supported_os = md5_verify(
         md5_check,
         "supported_OS.json",
         supported_OS_md5,
         SUPPORTED_OS_MD5)
+    logging.debug(
+        "Verification passed=" +
+        str(passed_md5_supported_os)
+    )
     outputfile_dict['passed_md5_supported_os'] = passed_md5_supported_os
+    logging.debug(
+        "Going to verify packages.json"
+    )
     passed_md5_packages = md5_verify(
         md5_check,
         "packages.json",
         packages_md5,
         PACKAGES_MD5)
+    logging.debug(
+        "Verification passed=" +
+        str(passed_md5_packages)
+    )
     outputfile_dict['passed_md5_packages'] = passed_md5_packages
+    logging.debug(
+        "Going to verify SAS_adapters.json"
+    )
     passed_md5_SAS_adapters = md5_verify(
         md5_check,
         "SAS_adapters.json",
         SAS_adapters_md5,
         SAS_ADAPTERS_MD5)
+    logging.debug(
+        "Verification passed=" +
+        str(passed_md5_SAS_adapters)
+    )
     outputfile_dict['passed_md5_SAS_adapters'] = passed_md5_SAS_adapters
+    logging.debug(
+        "Going to verify NIC_adapters.json"
+    )
     passed_md5_NIC_adapters = md5_verify(
         md5_check,
         "NIC_adapters.json",
         NIC_adapters_md5,
         NIC_ADAPTERS_MD5)
+    logging.debug(
+        "Verification passed=" +
+        str(passed_md5_NIC_adapters)
+    )
     outputfile_dict['passed_md5_NIC_adapters'] = passed_md5_NIC_adapters
+    logging.debug(
+        "Going to verify HW_requirements.json"
+    )
     passed_md5_HW_requirements = md5_verify(
         md5_check,
         "HW_requirements.json",
         HW_requirements_md5,
         HW_REQUIREMENTS_MD5)
     outputfile_dict['passed_md5_HW_requirements'] = passed_md5_HW_requirements
-
+    logging.debug(
+        "Verification passed=" +
+        str(passed_md5_HW_requirements)
+    )
     # Initial header and checks
+    logging.debug(
+        "Going to get JSON headers"
+    )
     json_version = get_json_versions(
         os_dictionary,
         packages_dictionary,
         SAS_dictionary,
         NIC_dictionary,
         HW_dictionary)
+    logging.debug(
+        "Got JSON headers"
+    )
+    logging.debug(
+        "Going to show header and ask for permission to run"
+    )
     show_header(MOR_VERSION, json_version, toolkit_run)
+    logging.debug(
+        "Printed header and accepted to run"
+    )
 
     # Set HW constants
+    logging.debug(
+        "Going to set HW requirements into variables"
+    )
     min_socket = HW_dictionary['MIN_SOCKET']
+    AMD_socket = HW_dictionary['AMD_SOCKET']
     min_cores = HW_dictionary['MIN_CORES']
     min_gb_ram = HW_dictionary['MIN_GB_RAM']
     max_drives = HW_dictionary['MAX_DRIVES']
     min_link_speed = HW_dictionary['MIN_LINK_SPEED']
+    logging.debug(
+        "HW requirements are: min_socket " +
+        str(min_socket) +
+        " AMD_socket " +
+        str(AMD_socket) +
+        " min_cores " +
+        str(min_cores) +
+        " min_gb_ram " +
+        str(min_gb_ram) +
+        " max_drives " +
+        str(max_drives) +
+        " min_link_speed " +
+        str(min_link_speed)
+    )
 
+    logging.debug(
+        "Going to write to dictionary the parameters of this run"
+    )
     outputfile_dict['parameters'] = [
         LOCAL_HOSTNAME,
         ip_address,
@@ -1715,25 +2220,72 @@ def main():
         storage_check,
         net_check,
         min_socket,
+        AMD_socket,
         min_cores,
         min_gb_ram,
         max_drives,
         min_link_speed]
+    logging.debug(
+        "Parameters of this run written"
+    )
 
     # Check root
+    logging.debug(
+        "Going to check if we are root"
+    )
     check_root_user()
+    logging.debug(
+        "root check passed"
+    )
 
     # Check cpu
+    logging.debug(
+        "Starting CPU checks"
+    )
     current_processor = "NOT CHECKED"
     num_sockets = 0
     core_count = 0
     if cpu_check:
+        logging.debug(
+            "CPU check is enabled"
+        )
+        logging.debug(
+            "Going to call check_processor()"
+        )
         fatal_error, current_processor = check_processor()
+        logging.debug(
+            "Got back from check_processor(). fatal_error=" +
+            str(fatal_error) +
+            " and current_processor=" +
+            str(current_processor)
+        )
         outputfile_dict['current_processor'] = current_processor
         if fatal_error:
             nfatal_errors = nfatal_errors + 1
+            logging.debug(
+                "Number of nfatal_errors is " +
+                str(nfatal_errors)
+            )
+        logging.debug(
+            "Going to call check_sockets_cores(" +
+            str(min_socket) +
+            ", " +
+            str(AMD_socket) +
+            ", " +
+            str(min_cores) +
+            ")" 
+        )
         fatal_error, num_sockets, core_count = check_sockets_cores(
-            min_socket, min_cores)
+            min_socket, AMD_socket, min_cores)
+        logging.debug(
+            "Got back from check_sockets_cores. fatal_error=" +
+            str(fatal_error) +
+            ", num_sockets=" +
+            str(num_sockets) +
+            ", core_count=" +
+            str(core_count)
+
+        )
         outputfile_dict['num_sockets'] = num_sockets
         outputfile_dict['cores_per_socket'] = core_count
         outputfile_dict['CPU_fatal_error'] = fatal_error
@@ -1742,25 +2294,55 @@ def main():
 
     # Check linux_distribution
     redhat_distribution_str = "NOT CHECKED"
+    logging.debug(
+        "Going to check the RedHat Linux distribution"
+    )
     # Need this part out of OS check in case it is disabled by user
     if PYTHON3:
         redhat_distribution = distro.linux_distribution()
     else:
         redhat_distribution = platform.linux_distribution()
+    logging.debug(
+        "Got RHEL Linux distribution " +
+        str(redhat_distribution)
+    )
     version_string = redhat_distribution[1]
     redhat8 = version_string.startswith("8.")
     # End of RHEL8 out of OS check
     if os_check:
+        logging.debug(
+            "Going to check the RHEL distribution is supported"
+        )
         linux_distribution = check_distribution()
+        logging.debug(
+            "Got back from check and got Linux distribution " +
+            str(linux_distribution)    
+        )
         outputfile_dict['linux_distribution'] = linux_distribution
         if linux_distribution in ["redhat", "centos"]:
+            logging.debug(
+                "We have a RHEL or CentOS distribution. We check for version"
+            )
             fatal_error, redhat_distribution_str, redhat8 = check_os_redhat(
                 os_dictionary)
+            logging.debug(
+                "Got back from detailed RHEL check. Got RHEL distribution " +
+                redhat_distribution_str +
+                ". Detected as RHEL8 is " +
+                str(redhat8) +
+                ". And fatal_error=" +
+                str(fatal_error)
+            )
             if fatal_error:
                 nfatal_errors = nfatal_errors + 1
             else:
                 outputfile_dict['OS'] = redhat_distribution_str
         else:
+            logging.debug(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " cannot determine Linux distribution\n"
+            )
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -1774,6 +2356,12 @@ def main():
                 " this tool cannot run on RHEL8 and Python 2\n")
     else:
         if redhat8 and (not PYTHON3):
+            logging.debug(
+                ERROR +
+                LOCAL_HOSTNAME +
+                " this tool cannot run on RHEL8 and Python 2, " +
+                "please check the README\n"
+            )
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -1782,14 +2370,44 @@ def main():
 
     # Check packages
     if packages_ch:
+        logging.debug(
+            "Going to check for required packages"    
+        )
         packages_errors = packages_check(packages_dictionary)
         if packages_errors > 0:
+            logging.debug(
+                "Got number of failed required packages " +
+                str(packages_errors)
+            )
             sys.exit(
                 ERROR +
                 LOCAL_HOSTNAME +
                 " has missing packages that need to be installed\n")
         else:
+            logging.debug(
+                "Passed required packages check"
+            )
             outputfile_dict['packages_checked'] = packages_dictionary
+    
+    # Get node serial number
+    logging.debug(
+        "Going to get node serial number"
+    )
+    fatal_error, system_serial = get_system_serial()
+    if fatal_error:
+        logging.debug(
+            "We got an error from quering the system serial"
+        )
+    else:
+        logging.debug(
+            "Got node serial number " +
+            str(system_serial)
+        )
+    outputfile_dict['system_serial_error'] = fatal_error
+    outputfile_dict['system_serial'] = system_serial
+    logging.debug(
+        "Wrote serial number on output dictionary"
+    )
 
     # Check memory
     mem_gb = 0
@@ -1797,12 +2415,27 @@ def main():
     num_dimms = 0
     empty_dimms = 0
     if mem_check:
+        logging.debug(
+            "Going to perform the memory checks"
+        )
         (fatal_error,
             mem_gb,
             dimms,
             num_dimms,
             empty_dimms,
             main_memory_size) = check_memory(min_gb_ram)
+        logging.debug(
+            "Got memory GB: " +
+            str(mem_gb) +
+            ". Number of DIMMs: " +
+            str(num_dimms) +
+            ". Number of empty DIMMs: " +
+            str(empty_dimms) +
+            ". Main memory size: " +
+            str(main_memory_size) +
+            ". Fatal error is " +
+            str(fatal_error)
+        )
         outputfile_dict['memory_all'] = [fatal_error, mem_gb,
                                          dimms, num_dimms, empty_dimms,
                                          main_memory_size]
@@ -1827,44 +2460,118 @@ def main():
     SAS_model = ""
     
     if storage_check:
+        logging.debug(
+            "Going to perform storage checks"
+        )
         SAS_fatal_error, check_disks, SAS_model = check_SAS(SAS_dictionary)
+        logging.debug(
+            "Got back from check_SAS with SAS_fatal_error=" +
+            str(SAS_fatal_error) +
+            ", check_disks=" +
+            str(check_disks) +
+            " and SAS_model=" +
+            str(SAS_model)
+        )
         outputfile_dict['error_SAS_card'] = SAS_fatal_error
         outputfile_dict['SAS_model'] = SAS_model
         if check_disks:
+            logging.debug(
+                "We have disks to check, first we check the SAS packages"
+            )
             SAS_packages_errors = check_SAS_packages(packages_ch)
+            logging.debug(
+                "Got SAS_packages_errors=" +
+                str(SAS_packages_errors)
+            )
             outputfile_dict['SAS_packages_errors'] = SAS_packages_errors
             if SAS_packages_errors > 0:
+                logging.debug(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " has missing packages needed to run this tool\n"
+                )
                 sys.exit(
                     ERROR +
                     LOCAL_HOSTNAME +
                     " has missing packages needed to run this tool\n")
             else:
+                logging.debug(
+                    "Going to gather more information to add to JSON file"
+                )
                 # Extra information to the JSON
+                logging.debug(
+                    "Going to run /opt/MegaRAID/storcli/storcli64 /call show all j"
+                )
                 call_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call show all j")
+                logging.debug(call_all)
                 outputfile_dict['storcli_call'] = json.loads(call_all)
+                logging.debug(
+                    "Going to run /opt/MegaRAID/storcli/storcli64 /call/eall show all j"
+                )
                 call_eall_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call/eall show all j")
+                logging.debug(call_eall_all)
                 outputfile_dict['storcli_call_eall'] = json.loads(call_eall_all)
+                logging.debug(
+                    "Going to run /opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j"
+                )
                 call_sall_all = exec_cmd(
                     "/opt/MegaRAID/storcli/storcli64 /call/eall/sall show all j")
+                logging.debug(call_sall_all)
                 outputfile_dict['storcli_call_sall_all'] = json.loads(call_sall_all)
                 # Checks start
-                HDD_error, n_HDD_drives, HDD_dict = check_SAS_disks("HDD")
+                logging.debug(
+                    "Going to start HDD tests"
+                )
+                HDD_error, n_HDD_drives, HDD_dict = check_SAS_disks("HDD", sata_on)
+                logging.debug(
+                    "Got HDD_error=" +
+                    str(HDD_error) +
+                    ", and n_HDD_drives=" +
+                    str(n_HDD_drives) +
+                    ", HDD_dict" +
+                    str(HDD_dict)
+                )
                 outputfile_dict['HDD_fatal_error'] = HDD_error
                 outputfile_dict['HDD_n_of_drives'] = n_HDD_drives
                 outputfile_dict['HDD_drives'] = HDD_dict
                 if n_HDD_drives > 0:
+                    logging.debug(
+                        "Going to check WCE on HDD"
+                    )
                     HDD_WCE_error, HDD_dict = check_WCE_SAS(HDD_dict)
+                    logging.debug(
+                        "Got HDD_WCE_error=" +
+                        str(HDD_WCE_error)
+                    )
                     outputfile_dict['HDD_WCE_error'] = HDD_WCE_error
                     if HDD_WCE_error:
                         nfatal_errors = nfatal_errors + 1
-                SSD_error, n_SSD_drives, SSD_dict = check_SAS_disks("SSD")
+                logging.debug(
+                    "Going to start SDD tests"
+                )
+                SSD_error, n_SSD_drives, SSD_dict = check_SAS_disks("SSD", sata_on)
+                logging.debug(
+                    "Got SSD_error=" +
+                    str(SSD_error) +
+                    ", and n_SSD_drives=" +
+                    str(n_SSD_drives) +
+                    ", SSD_dict" +
+                    str(SSD_dict)
+                )
                 outputfile_dict['SSD_fatal_error'] = SSD_error
                 outputfile_dict['SSD_n_of_drives'] = n_SSD_drives
                 outputfile_dict['SSD_drives'] = SSD_dict
                 if n_SSD_drives > 0:
+                    logging.debug(
+                        "Going to check WCE on SSD"
+                    )
                     SSD_WCE_error, SSD_dict = check_WCE_SAS(SSD_dict)
+                    logging.debug(
+                        "Got SSD_WCE_error=" +
+                        str(SSD_WCE_error)
+                    )
                     outputfile_dict['SSD_WCE_error'] = SSD_WCE_error
                     if SSD_WCE_error:
                         nfatal_errors = nfatal_errors + 1
@@ -1872,15 +2579,41 @@ def main():
                     n_mestor_drives = n_mestor_drives + n_HDD_drives
                 if not SSD_error:
                     n_mestor_drives = n_mestor_drives + n_SSD_drives
+                logging.debug(
+                    "We got " +
+                    str(n_HDD_drives) +
+                    " HDD and " +
+                    str(n_SSD_drives) +
+                    " SSD drives that ECE can use"
+                )
                 if HDD_error and SSD_error:
+                    logging.debug(
+                        "We have a SAS card but no drives ECE can use under it"
+                    )
                     SAS_but_no_usable_drives = True
                     outputfile_dict['found_SAS_card_but_no_drives'] = True
         # NVME checks
+        logging.debug(
+            "Going to start NVMe tests"
+        )
         NVME_error, n_NVME_drives = check_NVME()
+        logging.debug(
+            "Got back from check_NVME with NVME_error=" +
+            str(NVME_error) +
+            " and n_NVME_drives=" +
+            str(n_NVME_drives)
+        )
         outputfile_dict['NVME_fatal_error'] = NVME_error
         outputfile_dict['NVME_number_of_drives'] = n_NVME_drives
         if not NVME_error:
+            logging.debug(
+                "Going to check for NVMe packages"
+            )
             NVME_packages_errors = check_NVME_packages(packages_ch)
+            logging.debug(
+                "Got back from check_NVME_packages with NVME_packages_errors=" +
+                str(NVME_packages_errors)
+            )
             outputfile_dict['NVME_packages_errors'] = NVME_packages_errors
             if NVME_packages_errors > 0:
                 sys.exit(
@@ -1889,34 +2622,76 @@ def main():
                     " has missing packages needed to run this tool\n")
             else:
                 n_mestor_drives = n_mestor_drives + n_NVME_drives
+                logging.debug(
+                    "We got " +
+                    str(n_NVME_drives) +
+                    " NVMe drives. Going to run NVMe checks"
+                )
                 NVME_error, NVME_dict = check_NVME_disks()
+                logging.debug(
+                    "Got back from check_NVME_disks with NVME_error=" +
+                    str(NVME_error) +
+                    " and NVME_dict " +
+                    str(NVME_dict)
+                )
         if n_NVME_drives > 0:
+            logging.debug(
+                "Going to check WCE on NVMe"
+            )
             NVME_WCE_error, NVME_dict = check_WCE_NVME(NVME_dict)
+            logging.debug(
+                "Got back from check_WCE_NVME with NVME_WCE_error=" +
+                str(NVME_WCE_error)
+            )
             outputfile_dict['NVME_WCE_error'] = NVME_WCE_error
             if NVME_WCE_error:
                 nfatal_errors = nfatal_errors + 1
             # All LBA NVME the same check
+            logging.debug(
+                "Going to check LBA on NVMe"
+            )
             NVME_LBA_error = check_LBA_NVME(NVME_dict)
+            logging.debug(
+                "Got back from check_LBA_NVME with NVME_LBA_error=" +
+                str(NVME_LBA_error)
+            )
             outputfile_dict['NVME_LBA_error'] = NVME_LBA_error
             if NVME_LBA_error:
                 nfatal_errors = nfatal_errors + 1
             # Metadata NVME check
+            logging.debug(
+                "Going to check MD on NVMe"
+            )
             NVME_MD_error = check_MD_NVME(NVME_dict)
+            logging.debug(
+                "Got back from check_MD_NVME with NVME_MD_error=" +
+                str(NVME_MD_error)
+            )
             outputfile_dict['NVME_MD_error'] = NVME_MD_error
             if NVME_MD_error:
                 nfatal_errors = nfatal_errors + 1
 
         outputfile_dict['NVME_drives'] = NVME_dict
 
+        logging.debug(
+            "the number of drives ECE can use in this host is " +
+            str(n_mestor_drives)
+        )
         outputfile_dict['ALL_number_of_drives'] = n_mestor_drives
         # Throw a warning if no drives
         if SAS_but_no_usable_drives:
+            logging.debug(
+                "We have a supported SAS card but no usable drives"
+            )
             print(
                 WARNING +
                 LOCAL_HOSTNAME +
                 " has a supported SAS adapter but no supported drives")
         # Lets check what we can use here
         if SAS_fatal_error and NVME_error:
+            logging.debug(
+                "We found issues on SAS and NVMe checks"
+            )
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -1924,6 +2699,9 @@ def main():
                 "devices in this system")
             nfatal_errors = nfatal_errors + 1
         if SSD_error and NVME_error:
+            logging.debug(
+                "There is no non-rotational device in this host"
+            )
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -1931,12 +2709,22 @@ def main():
                 "one device of those types is required to run ECE")
             nfatal_errors = nfatal_errors + 1
         else:
+            logging.debug(
+                "We have at least one non-rotatioal device in this host"
+            )
             print(
                 INFO +
                 LOCAL_HOSTNAME +
                 " has at least one SSD or NVMe device that ECE can use. " +
                 "This is required to run ECE")
             if n_mestor_drives > max_drives:
+                logging.debug(
+                    "This host has " +
+                    str(n_mestor_drives) +
+                    " drives which is more than the allowed max of " +
+                    str(max_drives) +
+                    " per host"
+                )
                 print(
                     ERROR +
                     LOCAL_HOSTNAME +
@@ -1954,20 +2742,40 @@ def main():
                     " drives that ECE can use")
 
     # Network checks
+    logging.debug(
+        "Going to start network checks on this host: " +
+        LOCAL_HOSTNAME
+    )
     outputfile_dict['local_hostname'] = LOCAL_HOSTNAME
     ip_address_is_IP = is_IP_address(ip_address)
+    logging.debug(
+        "The input IP address is possible?=" +
+        str(ip_address_is_IP)
+    )
     outputfile_dict['IP_address_is_possible'] = ip_address_is_IP
     outputfile_dict['ip_address'] = ip_address
     NIC_model = ""
     device_speed = "NOT CHECKED"
 
     if net_check:
+        logging.debug(
+            "Going to check NIC model"
+        )
         fatal_error, NIC_model = check_NIC(NIC_dictionary)
+        logging.debug(
+            "Got back from check_NIC with fatal_error=" +
+            str(fatal_error) +
+            " and NIC_model=" +
+            str(NIC_model)
+        )
         outputfile_dict['error_NIC_card'] = fatal_error
         outputfile_dict['NIC_model'] = NIC_model
         if fatal_error:
             nfatal_errors = nfatal_errors + 1
         elif (ip_address_is_IP):
+            logging.debug(
+                "Going to check if IP corresponds to a device what its link speed"
+            )
             print(
                 INFO +
                 LOCAL_HOSTNAME +
@@ -1978,6 +2786,12 @@ def main():
             outputfile_dict['ALL_net_devices'] = net_devices
             fatal_error, net_interface = what_interface_has_ip(
                 net_devices, ip_address)
+            logging.debug(
+                "Got back from what_interface_has_ip with fatal_error=" +
+                str(fatal_error) +
+                " and net_interface=" +
+                str(net_interface)
+            )
             outputfile_dict['IP_not_found'] = fatal_error
             outputfile_dict['netdev_with_IP'] = net_interface
             if fatal_error:
@@ -1987,11 +2801,20 @@ def main():
                 # this IP
                 fatal_error, device_speed = check_NIC_speed(
                     net_interface, min_link_speed)
+                logging.debug(
+                    "Got back from check_NIC_speed with fatal_error=" +
+                    str(fatal_error) +
+                    " and link speed of " +
+                    str(device_speed)
+                )
                 outputfile_dict['netdev_speed_error'] = fatal_error
                 outputfile_dict['netdev_speed'] = device_speed
                 if fatal_error:
                     nfatal_errors = nfatal_errors + 1
         else:
+            logging.debug(
+                "The IP is not a valid one"
+            )
             print(
                 ERROR +
                 LOCAL_HOSTNAME +
@@ -2002,17 +2825,45 @@ def main():
 
     # Check tuned
     if tuned_check:
+        logging.debug(
+            "Going to check tuned profile"
+        )
         fatal_error = tuned_adm_check()
+        logging.debug(
+            "Got back from tuned_adm_check with fatal_error=" +
+            str(fatal_error)
+        )
         if fatal_error:
             nfatal_errors = nfatal_errors + 1
             outputfile_dict['tuned_fail'] = True
         else:
             outputfile_dict['tuned_fail'] = False
 
+    # Check py3 YAML
+    logging.debug(
+        "Going to check for py3_yaml"
+    )
+    fatal_error = check_py3_yaml()
+    logging.debug(
+        "Got back from check_py3_yaml with fatal_error=" +
+        str(fatal_error)
+    )
+    if fatal_error:
+        nfatal_errors = nfatal_errors + 1
+        outputfile_dict['py3_yaml_fail'] = True
+    else:
+        outputfile_dict['py3_yaml_fail'] = False
+    
     # Set general status of acceptance of this node
     if nfatal_errors == 0 and all_checks_on:
+        logging.debug(
+            "All checks were enabled and were passed successfully"
+        )
         outputfile_dict['ECE_node_ready'] = True
     else:
+        logging.debug(
+            "Either not all checks were enabled or not all were passed successfully"
+        )
         outputfile_dict['ECE_node_ready'] = False
 
     # Save lspci output to JSON
@@ -2066,7 +2917,8 @@ def main():
             n_NVME_drives,
             NIC_model,
             device_speed,
-            all_checks_on)
+            all_checks_on,
+            sata_on)
 
 
 if __name__ == '__main__':
