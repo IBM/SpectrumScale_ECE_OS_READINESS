@@ -3,7 +3,7 @@ This tool assesses the readiness of a single node to run IBM Spectrum Scale Eras
 This tool is run when installing ECE with the Spectrum Scale toolkit, it is used by the toolkit to do a more comprehensive inter node checking from a cluster perspective, this tool does only check at node level. Each run it generates a JSON file with name IP_ADDRESS.json where some data is saved, on standalone mode this file is only for reference.
 
 **IMPORTANT**
-This tool is does not overrule the official documentation of the product. The requiriments stated on the official documenation are the authoritative ones as [Minimum hardware requirements and precheck](https://www.ibm.com/support/knowledgecenter/STXKQY_ECE_5.0.4/com.ibm.spectrum.scale.ece.v5r04.doc/b1lece_min_hwrequirements.html)
+This tool is does not overrule the official documentation of the product. The requiriments stated on the official documenation are the authoritative ones as [Minimum hardware requirements and precheck](https://www.ibm.com/docs/en/spectrum-scale-ece/5.1.1?topic=requirements-minimum-hardware-precheck)
 
 **Known limitations**
 - Current code only works correctly if the system has one or none SAS cards. It does not properly work with more than one SAS card yet. Results cannot be trusted when more than one SAS card is on the system. This is plan to be addressed on future builds
