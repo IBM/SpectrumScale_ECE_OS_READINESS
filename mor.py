@@ -31,7 +31,7 @@ else:
 start_time_date = datetime.datetime.now()
 
 # This script version, independent from the JSON versions
-MOR_VERSION = "1.62"
+MOR_VERSION = "1.63"
 
 # GIT URLs
 GITREPOURL = "https://github.com/IBM/SpectrumScale_ECE_OS_READINESS"
@@ -58,7 +58,7 @@ WWNPATT = re.compile('.*"WWN"\s*:\s*"(?P<wwn>.*)"')
 OSVERPATT = re.compile('(?P<major>\d+)[\.](?P<minor>\d+)[\.].*')
 PCIPATT = re.compile('(?P<pciaddr>[a-fA-f0-9]{2}:[a-fA-f0-9]{2}[\.][0-9])'
                      '[\ ](?P<pcival>.*)')
-
+                     
 # Next are python modules that need to be checked before import
 if platform.processor() != 's390x':
     try:
@@ -105,11 +105,11 @@ except ImportError:
 DEVNULL = open(os.devnull, 'w')
 
 # Define expected MD5 hashes of JSON input files
-HW_REQUIREMENTS_MD5 = "b8a880a7152868f57a721b1a52d9ce05"
+HW_REQUIREMENTS_MD5 = "cde42d073fd4339197f33f0a8ddb7824"
 NIC_ADAPTERS_MD5 = "00412088e36bce959350caea5b490001"
-PACKAGES_MD5 = "3bc8b63548de2e16fd9ce67adc073da1"
+PACKAGES_MD5 = "a15b08b05998d455aad792ef5d3cc811"
 SAS_ADAPTERS_MD5 = "4c28f6f00ccd6639bfa00318e2b51256"
-SUPPORTED_OS_MD5 = "63404a5848f695aa6b940938c359d28c"
+SUPPORTED_OS_MD5 = "dfa2260da176cf3f62782851a8bb50cc"
 
 # Functions
 def set_logger_up(output_dir, log_file, verbose):
@@ -321,6 +321,13 @@ def md5_verify(md5_check, json_file_str, md5_hash_real, md5_hash_expected):
             " MD5 hash failed to verify file: " +
             json_file_str)
         return False
+        
+def convert_to_bytes(size, unit):
+    unit_dict = { "KB":10**3, "MB":10**6,"GB":10**9, "TB":10**12, "KiB":2**10, "MiB":2**20, "GiB":2**30, "TiB": 2**40 }
+    size_in_bytes = -1
+    if unit in unit_dict.keys():
+        size_in_bytes = size * unit_dict[unit]
+    return size_in_bytes
 
 
 def show_header(moh_version, json_version, toolkit_run):
@@ -554,7 +561,7 @@ def check_processor():
     return fatal_error, current_processor
 
 
-def check_sockets_cores(min_socket, amd_socket, min_cores):
+def check_sockets_cores(min_socket, amd_socket, min_cores, AMD_min_cores):
     fatal_error = False
     cores = []
     if platform.processor() != 's390x':
@@ -574,6 +581,7 @@ def check_sockets_cores(min_socket, amd_socket, min_cores):
         num_sockets = len(sockets)
         if is_AMD:
             min_socket = amd_socket
+            min_cores = AMD_min_cores
             print(
                 INFO +
                 LOCAL_HOSTNAME +
@@ -939,7 +947,14 @@ def check_NVME_disks():
             " cannot query NVMe devices"
             )
     return fatal_error, drives_dict
-
+    
+def check_NVME_log_home(drives_dict, size):
+    log_home_found = False
+    for drive in drives_dict.keys():
+        if int(drives_dict[drive][2]) >= size:
+            log_home_found = True
+            break
+    return log_home_found
 
 def check_NVME_ID(drives_dict):
     fatal_error = False
@@ -1257,10 +1272,10 @@ def check_SAS(SAS_dictionary):
             lspci_out = subprocess.Popen(['lspci'], stdout=subprocess.PIPE)
             grep_proc = subprocess.Popen(['egrep', 'SAS|MegaRAID'], stdin=lspci_out.stdout, stdout=subprocess.PIPE)
             grep_out_lspci, err = grep_proc.communicate()
-            if err != '':
+            if err != None:
                 # We hit something unexpected
                 fatal_error = True
-            if grep_out_lspci == '':
+            if grep_out_lspci == None:
                 grep_rc_lspci = 1
             else:
                 grep_rc_lspci = 0
@@ -1562,7 +1577,7 @@ def check_SAS_disks(device_type, sata_on):
         number_of_drives = len(drives)
         number_of_SATA_drives = len(SATA_drives)
 
-        if number_of_SATA_drives > 1:
+        if number_of_SATA_drives > 0:
             if sata_on:
                 sata_checks_passed = False
                 # We are going to do some SATA checks
@@ -1698,6 +1713,14 @@ def check_SAS_disks(device_type, sata_on):
         fatal_error = True
 
     return fatal_error, number_of_drives, SAS_drives_dict
+    
+def check_SSD_loghome(SSD_dict, size):
+    log_home_found = False
+    for SSD in SSD_dict:
+        if convert_to_bytes(int(SSD[0]),SSD[1]) >= size:
+            log_home_found = True
+            break
+    return log_home_found
 
 
 def check_WCE_NVME(NVME_dict):
@@ -1905,14 +1928,54 @@ def check_is_hipersocket_NIC(net_interface):
         card_type = card_type.split()
         if card_type[2] == 'HiperSockets':
             is_hipersocket = True
+        else:
+            # checking if Hipersockets interface is bonded
+            bondedIfs = subprocess.getoutput(
+            'ls -d /sys/class/net/'+net_interface+'/lower_* | awk -Flower_ {\'print $2\'} ')
+            # loop through bonded interfaces and check if any is of type Hipersockets 
+            for bondedIf in bondedIfs.split():
+                card_type = subprocess.getoutput(
+                '/usr/sbin/lsqeth ' + bondedIf + ' | grep card_type ' )
+                card_type = card_type.split()
+                if card_type[2] == 'HiperSockets':
+                    is_hipersocket = True
+                    break
+            
     except BaseException:
         sys.exit(
             ERROR +
             LOCAL_HOSTNAME +
-            " NIC card_type could not be determined ")
+            " NIC card_type Hipersockets  could not be determined ")
 
     return is_hipersocket    
     
+def check_is_roce_NIC(net_interface):
+    is_roce_NIC = False
+    try:
+        # get all RoCE interfaces
+        roceInterfaces = subprocess.getoutput(
+            '/usr/sbin/rdma link show -jp | grep netdev\\" | awk -F\\" {\'print " "$4" "\'} | tr \'\\n\' \' \' ')
+        # check if word net_interface is among roceInterfaces 
+        if " "+net_interface+" " in roceInterfaces:
+            is_roce_NIC = True
+        else:
+            # checking if RoCE interface is bonded 
+            bondedIfs = subprocess.getoutput(
+            'ls -d /sys/class/net/'+net_interface+'/lower_* | awk -Flower_ {\'print $2\'} ')
+            # loop through bonded interfaces and check if any is among roceInterfaces 
+            for bondedIf in bondedIfs.split():
+                if " "+bondedIf+" " in roceInterfaces:
+                    is_roce_NIC = True
+                    break
+
+    except BaseException:
+        sys.exit(
+            ERROR +
+            LOCAL_HOSTNAME +
+            " NIC card_type RoCE could not be determined ")
+
+    return is_roce_NIC
+
 
 def check_NIC(NIC_dictionary,ip_address):
     fatal_error = False
@@ -1933,34 +1996,58 @@ def check_NIC(NIC_dictionary,ip_address):
                 " an undetermined error ocurred while " +
                 "determing which NIC adapters runs IP:" +
                 ip_address)
-        try:
-            is_hipersocket_NIC = check_is_hipersocket_NIC(net_interface)
-            
-            if is_hipersocket_NIC: 
-                print(
-                    INFO +
-                    LOCAL_HOSTNAME +
-                    " has " +
-                    net_interface +
-                    " hipersocket adapter which is supported by ECE")
-                found_NIC = True
-            else:
-                print(
+
+        if not fatal_error:
+
+            try:
+                is_hipersocket_NIC = check_is_hipersocket_NIC(net_interface)
+                
+                if is_hipersocket_NIC: 
+                    print(
+                        INFO +
+                        LOCAL_HOSTNAME +
+                        " has " +
+                        net_interface +
+                        " hipersocket adapter which is supported by ECE")
+                    found_NIC = True
+
+            except BaseException:
+                sys.exit(
                     ERROR +
                     LOCAL_HOSTNAME +
-                    " defined IP:" +
-                    ip_address +
-                    " does not run on an hipersockets adapter. " +
-                    "This is mandatory in order to run ECE on s390x")
-                found_NIC = False
-                fatal_error = True
+                    " an undetermined error ocurred while " +
+                    "determing if we run on hipersockets NIC")
 
-        except BaseException:
-            sys.exit(
-                ERROR +
-                LOCAL_HOSTNAME +
-                " an undetermined error ocurred while " +
-                "determing NIC adapters")
+            try:
+                is_roce_NIC = check_is_roce_NIC(net_interface)
+
+                if is_roce_NIC:
+                    print(
+                        INFO +
+                        LOCAL_HOSTNAME +
+                        " has " +
+                        net_interface +
+                        " RoCE adapter which is supported by ECE")
+                    found_NIC = True
+
+                if not found_NIC:
+                    print(
+                        ERROR +
+                        LOCAL_HOSTNAME +
+                        " IP:" +
+                        ip_address +
+                        " does not run on neither hipersockets nor RoCE adapter. " +
+                        "This is mandatory in order to run ECE on s390x")
+                    fatal_error = True
+
+            except BaseException:
+                sys.exit(
+                    ERROR +
+                    LOCAL_HOSTNAME +
+                    " an undetermined error ocurred while " +
+                    "determing if we run on RoCE")
+
+
 
     else:
         for NIC in NIC_dictionary:
@@ -2367,6 +2454,7 @@ def main():
     if platform.processor() == 's390x':
         min_socket = HW_dictionary['MIN_SOCKET_S390X']
         AMD_socket = 0
+        AMD_min_cores = 0
         min_cores = HW_dictionary['MIN_CORES_S390X']
         min_gb_ram = HW_dictionary['MIN_GB_RAM_S390X']
         max_drives = HW_dictionary['MAX_DRIVES_S390X']
@@ -2375,9 +2463,11 @@ def main():
         min_socket = HW_dictionary['MIN_SOCKET']
         AMD_socket = HW_dictionary['AMD_SOCKET']
         min_cores = HW_dictionary['MIN_CORES']
+        AMD_min_cores = HW_dictionary['AMD_CORES']
         min_gb_ram = HW_dictionary['MIN_GB_RAM']
         max_drives = HW_dictionary['MAX_DRIVES']
         min_link_speed = HW_dictionary['MIN_LINK_SPEED']
+        min_loghome_size = HW_dictionary['MIN_LOGHOME_DRIVE_SIZE']
 
     logging.debug(
         "HW requirements are: min_socket " +
@@ -2386,6 +2476,8 @@ def main():
         str(AMD_socket) +
         " min_cores " +
         str(min_cores) +
+        "AMD_min_cores" +
+        str(AMD_min_cores) +
         " min_gb_ram " +
         str(min_gb_ram) +
         " max_drives " +
@@ -2410,6 +2502,7 @@ def main():
         net_check,
         min_socket,
         AMD_socket,
+        AMD_min_cores,
         min_cores,
         min_gb_ram,
         max_drives,
@@ -2462,10 +2555,12 @@ def main():
             str(AMD_socket) +
             ", " +
             str(min_cores) +
+            ", " +
+            str(AMD_min_cores) +
             ")" 
         )
         fatal_error, num_sockets, core_count = check_sockets_cores(
-            min_socket, AMD_socket, min_cores)
+            min_socket, AMD_socket, min_cores, AMD_min_cores)
         logging.debug(
             "Got back from check_sockets_cores. fatal_error=" +
             str(fatal_error) +
@@ -2641,11 +2736,14 @@ def main():
     n_HDD_drives = 0
     n_SSD_drives = 0
     n_NVME_drives = 0
+    SSD_log_home_pres = False
+    NVME_log_home_pres = False
     HDD_error = False
     SSD_error = False
     NVME_error = False
     SAS_but_no_usable_drives = False
     NVME_dict = {}
+    NVME_ID_dict = {}
     SAS_model = ""
     
     if storage_check:
@@ -2862,6 +2960,11 @@ def main():
                         outputfile_dict['SSD_WCE_error'] = SSD_WCE_error
                         if SSD_WCE_error:
                             nfatal_errors = nfatal_errors + 1
+                        logging.debug(
+                            "Going to check for SSD big enough for loghome"
+                        )
+                        SSD_log_home_pres = check_SSD_loghome(SSD_dict, min_loghome_size)
+                        
                     if not HDD_error:
                         n_mestor_drives = n_mestor_drives + n_HDD_drives
                     if not SSD_error:
@@ -2972,11 +3075,24 @@ def main():
 
                 if NVME_DUPLICATE_ID_error:
                     nfatal_errors = nfatal_errors + 1
-
-
+                    
+                logging.debug(
+                    "Going to check for NVMe big enough for loghome"
+                )
+                NVME_log_home_pres = check_NVME_log_home(NVME_dict, min_loghome_size)
+                
+            loghome_pres = NVME_log_home_pres or SSD_log_home_pres
+            if not loghome_pres:
+                print(
+                    ERROR + 
+                    LOCAL_HOSTNAME +
+                    " does not have NVMe or SSD drive with at least "
+                    + str(min_loghome_size) + " bytes of storage" )
+                nfatal_errors = nfatal_errors + 1
+            
             outputfile_dict['NVME_drives'] = NVME_dict
             outputfile_dict['NVME_ID'] = NVME_ID_dict
-
+            outputfile_dict['loghome_error'] = not loghome_pres
 
             logging.debug(
                 "the number of drives ECE can use in this host is " +
